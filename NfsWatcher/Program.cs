@@ -1,42 +1,38 @@
 ﻿using System;
 using System.IO;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.Caching.Memory;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
+using Microsoft.Extensions.Caching.Memory;
 
-class Program
+class FileMonitor
 {
-    private static ConcurrentQueue<(string EventType, string Path, string? OldPath)> eventCache = new();
+    private static readonly ConcurrentQueue<(string EventType, string Path, string? OldPath)> eventQueue = new();
+    private static readonly MemoryCache memoryCache = new MemoryCache(new MemoryCacheOptions());
     private static bool isRunning = true;
 
-    private static MemoryCache memoryCache = new(new MemoryCacheOptions());
-
-    // Stocare stări anterioare pentru fișiere modificate
-    private static Dictionary<string, (DateTime LastWriteTime, long Size)> fileStateCache = new();
-
-    static void Main(string[] args)
+    public static void Main(string[] args)
     {
-        IConfiguration config = new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-            .Build();
-
-        string pathToWatch = config["NfsWatcher:WatchPath"];
+        string pathToWatch = @"\\172.20.10.6\shared"; // Replace with your shared folder path
 
         if (string.IsNullOrWhiteSpace(pathToWatch) || !Directory.Exists(pathToWatch))
         {
-            Console.WriteLine($"Eroare: Calea specificată nu există sau nu e validă: {pathToWatch}");
+            Console.WriteLine($"Error: The specified path does not exist or is invalid: {pathToWatch}");
             return;
         }
 
         try
         {
-            using var watcher = new FileSystemWatcher(pathToWatch);
-            watcher.IncludeSubdirectories = true;
-            watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
-                                   NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime;
+            using var watcher = new FileSystemWatcher(pathToWatch)
+            {
+                IncludeSubdirectories = true,
+                NotifyFilter = NotifyFilters.FileName |
+                               NotifyFilters.DirectoryName |
+                               NotifyFilters.LastWrite |
+                               NotifyFilters.Size |
+                               NotifyFilters.CreationTime
+            };
 
             watcher.Created += OnCreated;
             watcher.Changed += OnChanged;
@@ -49,8 +45,8 @@ class Program
             Thread eventProcessor = new Thread(ProcessEvents);
             eventProcessor.Start();
 
-            Console.WriteLine($"Monitorizare pornită pentru: {pathToWatch}");
-            Console.WriteLine("Apasă Enter pentru a opri...");
+            Console.WriteLine($"Monitoring started for: {pathToWatch}");
+            Console.WriteLine("Press Enter to stop...");
             Console.ReadLine();
 
             isRunning = false;
@@ -58,7 +54,7 @@ class Program
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Eroare la pornirea watcher-ului: {ex.Message}");
+            Console.WriteLine($"Error starting the watcher: {ex.Message}");
         }
     }
 
@@ -69,92 +65,127 @@ class Program
                name.EndsWith(".tmp") || name.EndsWith(".temp") ||
                name.EndsWith(".swp") || name.EndsWith(".swx") ||
                name.EndsWith(".goutputstream") || name.Contains(".goutputstream") ||
-               name == ".ds_store" || name == "thumbs.db";
+               name.EndsWith(".part") || name == ".ds_store" || name == "thumbs.db";
     }
 
     private static bool IsDuplicateEvent(string eventType, string path, string? oldPath = null)
     {
-        string key = path + "|" + oldPath;
+        string key = $"{eventType}|{path}|{oldPath}";
         if (memoryCache.TryGetValue(key, out _))
             return true;
 
         memoryCache.Set(key, true, TimeSpan.FromSeconds(2));
         return false;
     }
+
     private static void OnCreated(object sender, FileSystemEventArgs e)
     {
-        if (IsTemporaryFile(e.FullPath) || IsDuplicateEvent("CREAT", e.FullPath)) return;
-        eventCache.Enqueue(("CREAT", e.FullPath, null));
+        if (IsTemporaryFile(e.FullPath)) return;
+
+        if (!IsDuplicateEvent("CREATED", e.FullPath))
+            eventQueue.Enqueue(("CREATED", e.FullPath, null));
     }
 
     private static void OnChanged(object sender, FileSystemEventArgs e)
     {
-        if (IsTemporaryFile(e.FullPath) || IsDuplicateEvent("MODIFICAT", e.FullPath)) return;
+        if (IsTemporaryFile(e.FullPath)) return;
 
-        try
-        {
-            var info = new FileInfo(e.FullPath);
-            if (!info.Exists) return;
-
-            string path = e.FullPath;
-            DateTime lastWrite = info.LastWriteTime;
-            long size = info.Length;
-
-            if (!fileStateCache.TryGetValue(path, out var oldState) || oldState.LastWriteTime != lastWrite || oldState.Size != size)
-            {
-                fileStateCache[path] = (lastWrite, size);
-                eventCache.Enqueue(("MODIFICAT", path, null));
-            }
-        }
-        catch (IOException)
-        {
-            // Ignoră erori temporare de fișier blocat
-        }
+        if (!IsDuplicateEvent("CHANGED", e.FullPath))
+            eventQueue.Enqueue(("CHANGED", e.FullPath, null));
     }
 
     private static void OnDeleted(object sender, FileSystemEventArgs e)
     {
-        if (IsTemporaryFile(e.FullPath) || IsDuplicateEvent("STERS", e.FullPath)) return;
-        eventCache.Enqueue(("STERS", e.FullPath, null));
+        if (IsTemporaryFile(e.FullPath)) return;
 
-        // Curăță din cache
-        fileStateCache.Remove(e.FullPath);
+        if (!IsDuplicateEvent("DELETED", e.FullPath))
+            eventQueue.Enqueue(("DELETED", e.FullPath, null));
     }
 
     private static void OnRenamed(object sender, RenamedEventArgs e)
     {
         if (IsTemporaryFile(e.FullPath) || IsTemporaryFile(e.OldFullPath)) return;
-        if (IsDuplicateEvent("REDENUMIT", e.FullPath)) return;
 
-        eventCache.Enqueue(("REDENUMIT", e.FullPath, e.OldFullPath));
-
-        // Mutăm starea fișierului în cache
-        if (fileStateCache.TryGetValue(e.OldFullPath, out var oldState))
-        {
-            fileStateCache[e.FullPath] = oldState;
-            fileStateCache.Remove(e.OldFullPath);
-        }
+        if (!IsDuplicateEvent("RENAMED", e.FullPath, e.OldFullPath))
+            eventQueue.Enqueue(("RENAMED", e.FullPath, e.OldFullPath));
     }
 
     private static void OnError(object sender, ErrorEventArgs e)
     {
-        Console.WriteLine($"[EROARE] Watcher a întâmpinat o problemă: {e.GetException().Message}");
+        Console.WriteLine($"[ERROR] Watcher encountered an issue: {e.GetException().Message}");
     }
 
     private static void ProcessEvents()
     {
-        while (isRunning || !eventCache.IsEmpty)
+        while (isRunning || !eventQueue.IsEmpty)
         {
-            if (eventCache.TryDequeue(out var ev))
+            var eventsBatch = new List<(string EventType, string Path, string? OldPath)>();
+            while (eventQueue.TryDequeue(out var ev))
             {
-                if (ev.EventType == "REDENUMIT")
-                    Console.WriteLine($"[REDENUMIT] {ev.OldPath} -> {ev.Path}");
-                else
-                    Console.WriteLine($"[{ev.EventType}] {ev.Path}");
+                eventsBatch.Add(ev);
+
+                // Limit batch size to 50 events to avoid indefinite processing
+                if (eventsBatch.Count >= 50) break;
+            }
+
+            if (eventsBatch.Count > 0)
+            {
+                ProcessBatch(eventsBatch);
             }
             else
             {
-                Thread.Sleep(100);
+                Thread.Sleep(100); // No events to process, sleep briefly
+            }
+        }
+    }
+
+    private static void ProcessBatch(List<(string EventType, string Path, string? OldPath)> events)
+    {
+        var groupedByPath = events.GroupBy(e => e.Path).ToList();
+
+        foreach (var group in groupedByPath)
+        {
+            var path = group.Key;
+            var eventsForPath = group.ToList();
+
+            // Handle patterns for Linux file save behavior
+            if (eventsForPath.Any(e => e.EventType == "RENAMED"))
+            {
+                var renameEvent = eventsForPath.FirstOrDefault(e => e.EventType == "RENAMED");
+                if (renameEvent != default)
+                {
+                    // Check if this is an intermediate rename (*filename -> filename)
+                    if (renameEvent.OldPath != null && renameEvent.OldPath.StartsWith("*") &&
+                        renameEvent.Path == renameEvent.OldPath.TrimStart('*'))
+                    {
+                        // Check if the file size or content changed
+                        var fileInfo = new FileInfo(renameEvent.Path);
+                        if (fileInfo.Exists)
+                        {
+                            Console.WriteLine($"[MODIFIED] {renameEvent.Path}");
+                        }
+                        else
+                        {
+                            Console.WriteLine($"[RENAMED] {renameEvent.OldPath} -> {renameEvent.Path}");
+                        }
+                    }
+                    else
+                    {
+                        Console.WriteLine($"[RENAMED] {renameEvent.OldPath} -> {renameEvent.Path}");
+                    }
+                }
+            }
+            else if (eventsForPath.Any(e => e.EventType == "CHANGED"))
+            {
+                Console.WriteLine($"[MODIFIED] {path}");
+            }
+            else if (eventsForPath.Any(e => e.EventType == "CREATED"))
+            {
+                Console.WriteLine($"[CREATED] {path}");
+            }
+            else if (eventsForPath.Any(e => e.EventType == "DELETED"))
+            {
+                Console.WriteLine($"[DELETED] {path}");
             }
         }
     }
