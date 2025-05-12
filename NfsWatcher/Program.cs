@@ -66,6 +66,7 @@ class Program
         return name.StartsWith("~$") || name.StartsWith(".~lock.") ||
                name.EndsWith(".tmp") || name.EndsWith(".temp") ||
                name.EndsWith(".swp") || name.EndsWith(".swx") ||
+               name.StartsWith(".goutputstream-") ||
                name == ".ds_store" || name == "thumbs.db";
     }
 
