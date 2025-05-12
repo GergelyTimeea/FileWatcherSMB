@@ -5,13 +5,16 @@ using System.Collections.Concurrent;
 using System.Threading;
 using System.Linq;
 using System.Collections.Generic;
-
+ 
 class Program
 {
     private static ConcurrentQueue<(string EventType, string Path, string? OldPath)> eventCache = new();
     private static bool isRunning = true;
     private static HashSet<string> eventDeduplicationSet = new();
     private static readonly object deduplicationLock = new();
+
+    // Antiviral queue: ține evidența fișierelor ce trebuie scanate
+    private static ConcurrentDictionary<string, DateTime> antivirusQueue = new();
 
     static void Main(string[] args)
     {
@@ -92,19 +95,33 @@ class Program
     {
         if (IsTemporaryFile(e.FullPath) || IsDuplicate("CREAT", e.FullPath)) return;
         eventCache.Enqueue(("CREAT", e.FullPath, null));
+
+        // Antivirus tracking logic
+        // Dacă fisierul este creat, adăugăm în coada de scanare
+        antivirusQueue[e.FullPath] = DateTime.Now;
     }
 
     private static void OnChanged(object sender, FileSystemEventArgs e)
     {
         if (IsTemporaryFile(e.FullPath) || IsDuplicate("MODIFICAT", e.FullPath)) return;
         if (e.ChangeType == WatcherChangeTypes.Changed)
+        {
             eventCache.Enqueue(("MODIFICAT", e.FullPath, null));
+
+            // Antivirus tracking logic
+            // Dacă e doar modificare, adăugăm în coada de scanare
+            antivirusQueue[e.FullPath] = DateTime.Now;
+        }
     }
 
     private static void OnDeleted(object sender, FileSystemEventArgs e)
     {
         if (IsTemporaryFile(e.FullPath) || IsDuplicate("STERS", e.FullPath)) return;
         eventCache.Enqueue(("STERS", e.FullPath, null));
+
+        // Antivirus tracking logic
+        // Dacă fișierul a fost șters, îl eliminăm din coada antivirus
+        antivirusQueue.TryRemove(e.FullPath, out _);
     }
 
     private static void OnRenamed(object sender, RenamedEventArgs e)
@@ -112,6 +129,10 @@ class Program
         if (IsTemporaryFile(e.FullPath) || IsTemporaryFile(e.OldFullPath)) return;
         if (IsDuplicate("REDENUMIT", e.FullPath, e.OldFullPath)) return;
         eventCache.Enqueue(("REDENUMIT", e.FullPath, e.OldFullPath));
+
+        // Antivirus tracking logic
+        antivirusQueue.TryRemove(e.OldFullPath, out _);
+        antivirusQueue[e.FullPath] = DateTime.Now;
     }
 
     private static void OnError(object sender, ErrorEventArgs e)
@@ -151,7 +172,6 @@ class Program
                 //redenumit și modificat → MODIFICAT(problema la word)
                 bool isSterCreat = relatedEvents.Contains("STERS") && relatedEvents.Contains("CREAT") && !relatedEvents.Contains("MODIFICAT");
                 //STERS și CREAT → REDENUMIT.(linux)
-
 
                 bool isSterCreatModificat = relatedEvents.Contains("STERS") && relatedEvents.Contains("CREAT") && relatedEvents.Contains("MODIFICAT");
                 bool isCreatModificat = relatedEvents.Contains("CREAT") && relatedEvents.Contains("MODIFICAT") &&
@@ -197,7 +217,6 @@ class Program
                     break;
                 }
 
-
                 if (isSterCreat)
                 {
                     Console.WriteLine($"[REDENUMIT] {e.OldPath} -> {e.Path}");
@@ -223,6 +242,16 @@ class Program
 
                 Console.WriteLine($"[{e.EventType}] {e.Path}");
                 pendingEvents.Remove(e);
+            }
+
+            // Antivirus tracking logic - write to file
+            try
+            {
+                File.WriteAllLines("to_scan.txt", antivirusQueue.Keys.OrderBy(x => x));
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[EROARE SCRIERE ANTIVIRUS] {ex.Message}");
             }
 
             Thread.Sleep(200);
