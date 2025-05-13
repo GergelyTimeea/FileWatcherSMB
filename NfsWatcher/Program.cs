@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using System.Collections.Concurrent;
 
 namespace MyNamespace
 {
@@ -11,6 +12,7 @@ namespace MyNamespace
     {
         private static readonly object eventLock = new();
         private static readonly List<(string Type, string Path, string? OldPath, DateTime Time)> eventBuffer = new();
+        private static readonly ConcurrentDictionary<Guid, string> eventDisplayMap = new();
         private static bool isRunning = true;
 
         static void Main()
@@ -52,12 +54,16 @@ namespace MyNamespace
             Thread processorThread = new(ProcessEvents);
             processorThread.Start();
 
+            Thread displayThread = new(DisplayEvents);
+            displayThread.Start();
+
             Console.WriteLine($"[INFO] Monitorizare pornită: {watchPath}");
             Console.WriteLine("Apasă Enter pentru a opri...");
             Console.ReadLine();
 
             isRunning = false;
             processorThread.Join();
+            displayThread.Join();
         }
 
         private static bool IsTemporaryFile(string path)
@@ -176,10 +182,25 @@ namespace MyNamespace
                     else
                         result = string.Join(" + ", types.Distinct());
 
-                    Console.WriteLine($"[{result}] {group.Key}");
+                    eventDisplayMap[Guid.NewGuid()] = $"[{result}] {group.Key}";
                 }
 
                 Thread.Sleep(200);
+            }
+        }
+
+        private static void DisplayEvents()
+        {
+            while (isRunning || !eventDisplayMap.IsEmpty)
+            {
+                foreach (var key in eventDisplayMap.Keys)
+                {
+                    if (eventDisplayMap.TryRemove(key, out var message))
+                    {
+                        Console.WriteLine(message);
+                    }
+                }
+                Thread.Sleep(100);
             }
         }
     }
