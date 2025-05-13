@@ -1,293 +1,186 @@
 ﻿using System;
 using System.IO;
 using Microsoft.Extensions.Configuration;
-using System.Threading;
-using System.Linq;
 using System.Collections.Generic;
-using System.Threading.Tasks;
+using System.Linq;
+using System.Threading;
 
-class Program
+namespace MyNamespace
 {
-    private static readonly List<(string EventType, string Path, string? OldPath, DateTime Time)> eventBuffer = new();
-    private static readonly object bufferLock = new();
-
-    private static bool isRunning = true;
-    private static HashSet<string> eventDeduplicationSet = new();
-    private static readonly object deduplicationLock = new();
-
-    private static Dictionary<string, DateTime> antivirusQueue = new();
-
-    static void Main(string[] args)
+    class MyClassCS
     {
-        IConfiguration config = new ConfigurationBuilder()
-            .SetBasePath(Directory.GetCurrentDirectory())
-            .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-            .Build();
+        private static readonly object eventLock = new();
+        private static readonly List<(string Type, string Path, string? OldPath, DateTime Time)> eventBuffer = new();
+        private static bool isRunning = true;
 
-        string pathToWatch = config["NfsWatcher:WatchPath"];
-
-        if (string.IsNullOrWhiteSpace(pathToWatch) || !Directory.Exists(pathToWatch))
+        static void Main()
         {
-            Console.WriteLine($"Eroare: Calea specificată nu există sau nu e validă: {pathToWatch}");
-            return;
-        }
+            IConfiguration config = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                .Build();
 
-        try
-        {
-            using var watcher = new FileSystemWatcher(pathToWatch);
-            watcher.IncludeSubdirectories = true;
-            watcher.NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName |
-                                   NotifyFilters.LastWrite | NotifyFilters.Size | NotifyFilters.CreationTime;
+            string? watchPath = config["NfsWatcher:WatchPath"];
 
-            watcher.Created += OnCreated;
+            if (string.IsNullOrWhiteSpace(watchPath) || !Directory.Exists(watchPath))
+            {
+                Console.WriteLine($"[EROARE] Calea nu este validă sau nu există: {watchPath}");
+                return;
+            }
+
+            using var watcher = new FileSystemWatcher(watchPath);
+
+            watcher.NotifyFilter = NotifyFilters.Attributes
+                                 | NotifyFilters.CreationTime
+                                 | NotifyFilters.DirectoryName
+                                 | NotifyFilters.FileName
+                                 | NotifyFilters.LastAccess
+                                 | NotifyFilters.LastWrite
+                                 | NotifyFilters.Security
+                                 | NotifyFilters.Size;
+
             watcher.Changed += OnChanged;
+            watcher.Created += OnCreated;
             watcher.Deleted += OnDeleted;
             watcher.Renamed += OnRenamed;
             watcher.Error += OnError;
 
+            watcher.Filter = "*.*";
+            watcher.IncludeSubdirectories = true;
             watcher.EnableRaisingEvents = true;
 
-            Thread eventProcessor = new Thread(ProcessEvents);
-            eventProcessor.Start();
+            Thread processorThread = new(ProcessEvents);
+            processorThread.Start();
 
-            Console.WriteLine($"Monitorizare pornită pentru: {pathToWatch}");
+            Console.WriteLine($"[INFO] Monitorizare pornită: {watchPath}");
             Console.WriteLine("Apasă Enter pentru a opri...");
             Console.ReadLine();
 
             isRunning = false;
-            eventProcessor.Join();
+            processorThread.Join();
         }
-        catch (Exception ex)
+
+        private static bool IsTemporaryFile(string path)
         {
-            Console.WriteLine($"Eroare la pornirea watcher-ului: {ex.Message}");
+            string name = Path.GetFileName(path).ToLowerInvariant();
+
+            return name.StartsWith("~$") ||
+                   name.StartsWith(".~lock.") ||
+                   name.StartsWith(".goutputstream-") ||
+                   name.EndsWith(".tmp") ||
+                   name.EndsWith(".temp") ||
+                   name.EndsWith(".swp") ||
+                   name.EndsWith(".swx") ||
+                   name == ".ds_store" ||
+                   name == "thumbs.db";
         }
-    }
 
-    private static bool IsTemporaryFile(string path)
-    {
-        string name = Path.GetFileName(path).ToLower();
-
-        return name.StartsWith("~$") || name.StartsWith(".~lock.") ||
-               name.EndsWith(".tmp") || name.EndsWith(".temp") ||
-               name.EndsWith(".swp") || name.EndsWith(".swx") ||
-               name.StartsWith(".goutputstream-") ||
-               name == ".ds_store" || name == "thumbs.db";
-    }
-
-    private static bool IsDuplicate(string eventType, string path, string? oldPath = null)
-    {
-        string key = eventType + "|" + path + "|" + oldPath;
-        lock (deduplicationLock)
+        private static void OnChanged(object sender, FileSystemEventArgs e)
         {
-            if (eventDeduplicationSet.Contains(key)) return true;
-            eventDeduplicationSet.Add(key);
-            _ = Task.Delay(800).ContinueWith(_ =>
-            {
-                lock (deduplicationLock)
-                {
-                    eventDeduplicationSet.Remove(key);
-                }
-            });
-            return false;
-        }
-    }
-
-    private static void OnCreated(object sender, FileSystemEventArgs e)
-    {
-        if (IsTemporaryFile(e.FullPath) || IsDuplicate("CREAT", e.FullPath)) return;
-        lock (bufferLock)
-        {
-            eventBuffer.Add(("CREAT", e.FullPath, null, DateTime.Now));
-        }
-    }
-
-    private static void OnChanged(object sender, FileSystemEventArgs e)
-    {
-        if (IsTemporaryFile(e.FullPath) || IsDuplicate("MODIFICAT", e.FullPath)) return;
-        if (e.ChangeType == WatcherChangeTypes.Changed)
-        {
-            lock (bufferLock)
+            if (IsTemporaryFile(e.FullPath)) return;
+            lock (eventLock)
             {
                 eventBuffer.Add(("MODIFICAT", e.FullPath, null, DateTime.Now));
             }
         }
-    }
 
-    private static void OnDeleted(object sender, FileSystemEventArgs e)
-    {
-        if (IsTemporaryFile(e.FullPath) || IsDuplicate("STERS", e.FullPath)) return;
-        lock (bufferLock)
+        private static void OnCreated(object sender, FileSystemEventArgs e)
         {
-            eventBuffer.Add(("STERS", e.FullPath, null, DateTime.Now));
-        }
-    }
-
-    private static void OnRenamed(object sender, RenamedEventArgs e)
-    {
-        if (IsTemporaryFile(e.FullPath) || IsTemporaryFile(e.OldFullPath)) return;
-        if (IsDuplicate("REDENUMIT", e.FullPath, e.OldFullPath)) return;
-        lock (bufferLock)
-        {
-            eventBuffer.Add(("REDENUMIT", e.FullPath, e.OldFullPath, DateTime.Now));
-        }
-    }
-
-    private static void OnError(object sender, ErrorEventArgs e)
-    {
-        Console.WriteLine($"[EROARE] Watcher a întâmpinat o problemă: {e.GetException().Message}");
-    }
-
-    private static void ProcessEvents()
-    {
-        while (isRunning || eventBuffer.Count > 0)
-        {
-            List<(string EventType, string Path, string? OldPath, DateTime Time)> toProcess;
-
-            lock (bufferLock)
+            if (IsTemporaryFile(e.FullPath)) return;
+            lock (eventLock)
             {
-                toProcess = eventBuffer
-                    .Where(e => (DateTime.Now - e.Time).TotalMilliseconds > 800)
-                    .ToList();
+                eventBuffer.Add(("CREAT", e.FullPath, null, DateTime.Now));
+            }
+        }
+
+        private static void OnDeleted(object sender, FileSystemEventArgs e)
+        {
+            if (IsTemporaryFile(e.FullPath)) return;
+            lock (eventLock)
+            {
+                eventBuffer.Add(("STERS", e.FullPath, null, DateTime.Now));
+            }
+        }
+
+        private static void OnRenamed(object sender, RenamedEventArgs e)
+        {
+            if (IsTemporaryFile(e.FullPath) || IsTemporaryFile(e.OldFullPath)) return;
+            string oldName = Path.GetFileName(e.OldFullPath).ToLowerInvariant();
+            if (oldName.StartsWith(".goutputstream-"))
+            {
+                lock (eventLock)
+                {
+                    eventBuffer.Add(("MODIFICAT", e.FullPath, null, DateTime.Now));
+                }
+                return;
             }
 
-            foreach (var e in toProcess)
+            lock (eventLock)
             {
-                List<(string EventType, string Path, string? OldPath, DateTime Time)> related;
-                lock (bufferLock)
+                eventBuffer.Add(("REDENUMIT", e.FullPath, e.OldFullPath, DateTime.Now));
+            }
+        }
+
+        private static void OnError(object sender, ErrorEventArgs e)
+        {
+            PrintException(e.GetException());
+        }
+
+        private static void PrintException(Exception? ex)
+        {
+            if (ex == null) return;
+            Console.WriteLine($"[EROARE] {ex.Message}");
+            Console.WriteLine("Stacktrace:");
+            Console.WriteLine(ex.StackTrace);
+            PrintException(ex.InnerException);
+        }
+
+        private static void ProcessEvents()
+        {
+            while (isRunning || eventBuffer.Any())
+            {
+                List<(string Type, string Path, string? OldPath, DateTime Time)> toProcess;
+
+                lock (eventLock)
                 {
-                    related = eventBuffer
-                        .Where(x =>
-                            (x.Path == e.Path || (x.OldPath != null && x.OldPath == e.OldPath)) &&
-                            (DateTime.Now - x.Time).TotalMilliseconds <= 2000)
+                    var now = DateTime.Now;
+                    toProcess = eventBuffer
+                        .Where(e => (now - e.Time).TotalMilliseconds > 800)
                         .ToList();
-                }
 
-                var relatedEvents = related.Select(x => x.EventType).ToList();
-
-                bool isRedenModificat = relatedEvents.Contains("REDENUMIT") && relatedEvents.Contains("MODIFICAT");
-                bool isSterCreat = relatedEvents.Contains("STERS") && relatedEvents.Contains("CREAT") && !relatedEvents.Contains("MODIFICAT");
-                bool isSterCreatModificat = relatedEvents.Contains("STERS") && relatedEvents.Contains("CREAT") && relatedEvents.Contains("MODIFICAT");
-                bool isCreatModificat = relatedEvents.Contains("CREAT") && relatedEvents.Contains("MODIFICAT") &&
-                                        !relatedEvents.Contains("STERS") && !relatedEvents.Contains("REDENUMIT");
-
-                bool isRedenIsActuallyModif = related.Count == 1 &&
-                    related[0].EventType == "REDENUMIT" &&
-                    related[0].OldPath != null &&
-                    Path.GetFileName(related[0].OldPath) == Path.GetFileName(related[0].Path) &&
-                    Path.GetExtension(related[0].OldPath) == Path.GetExtension(related[0].Path);
-
-                if (isSterCreatModificat)
-                {
-                    if (e.OldPath != null && Path.GetFileName(e.OldPath) != Path.GetFileName(e.Path))
-                    {
-                        Console.WriteLine($"[REDENUMIT] {e.OldPath} -> {e.Path}");
-                    }
-                    else
-                    {
-                        Console.WriteLine($"[MODIFICAT] {e.Path}");
-                        antivirusQueue[e.Path] = DateTime.Now;
-                    }
-
-                    lock (bufferLock)
-                    {
-                        eventBuffer.RemoveAll(x => x.Path == e.Path || x.OldPath == e.OldPath);
-                    }
-                    break;
-                }
-
-                if (isRedenModificat || isRedenIsActuallyModif)
-                {
-                    Console.WriteLine($"[MODIFICAT] {e.Path}");
-                    antivirusQueue[e.Path] = DateTime.Now;
-                    lock (bufferLock)
-                    {
-                        eventBuffer.RemoveAll(x => x.Path == e.Path || x.OldPath == e.OldPath);
-                    }
-                    break;
-                }
-
-                if (isCreatModificat)
-                {
-                    Console.WriteLine($"[CREAT] {e.Path}");
-                    antivirusQueue[e.Path] = DateTime.Now;
-                    lock (bufferLock)
-                    {
-                        eventBuffer.RemoveAll(x => x.Path == e.Path);
-                    }
-                    break;
-                }
-
-                if (isSterCreat)
-                {
-                    Console.WriteLine($"[REDENUMIT] {e.OldPath} -> {e.Path}");
-                    lock (bufferLock)
-                    {
-                        eventBuffer.RemoveAll(x => x.Path == e.Path || x.OldPath == e.OldPath);
-                    }
-                    break;
-                }
-
-                if (related.Count == 1)
-                {
-                    var evType = related[0].EventType;
-                    if (evType == "CREAT")
-                    {
-                        Console.WriteLine($"[CREAT] {e.Path}");
-                        antivirusQueue[e.Path] = DateTime.Now;
-                    }
-                    else if (evType == "MODIFICAT")
-                    {
-                        Console.WriteLine($"[MODIFICAT] {e.Path}");
-                        antivirusQueue[e.Path] = DateTime.Now;
-                    }
-                    else if (evType == "REDENUMIT")
-                    {
-                        Console.WriteLine($"[REDENUMIT] {e.OldPath} -> {e.Path}");
-                    }
-                    else if (evType == "STERS")
-                    {
-                        Console.WriteLine($"[STERS] {e.Path}");
-                        antivirusQueue.Remove(e.Path);
-
-                        try
-                        {
-                            var lines = File.Exists("to_scan.txt")
-                                ? File.ReadAllLines("to_scan.txt").ToList()
-                                : new List<string>();
-
-                            lines.RemoveAll(line => string.Equals(line.Trim(), e.Path.Trim(), StringComparison.OrdinalIgnoreCase));
-                            File.WriteAllLines("to_scan.txt", lines);
-                        }
-                        catch (Exception ex)
-                        {
-                            Console.WriteLine($"[EROARE SCRIERE to_scan.txt] {ex.Message}");
-                        }
-                    }
-
-                    lock (bufferLock)
-                    {
+                    foreach (var e in toProcess)
                         eventBuffer.Remove(e);
-                    }
-                    break;
                 }
 
-                Console.WriteLine($"[{e.EventType}] {e.Path}");
-                lock (bufferLock)
+                var grouped = toProcess
+                    .GroupBy(e => e.Path)
+                    .ToList();
+
+                foreach (var group in grouped)
                 {
-                    eventBuffer.Remove(e);
+                    var events = group.ToList();
+                    var types = events.Select(e => e.Type).ToList();
+
+                    string result;
+
+                    if (types.Contains("STERS") && types.Contains("CREAT") && types.Contains("MODIFICAT"))
+                        result = "MODIFICAT (înlocuit)";
+                    else if (types.Contains("STERS") && types.Contains("CREAT"))
+                        result = "REDENUMIT (posibil mutat)";
+                    else if (types.Contains("CREAT") && types.Contains("MODIFICAT"))
+                        result = "CREAT + scan antivirus";
+                    else if (types.Contains("REDENUMIT") && types.Contains("MODIFICAT"))
+                        result = "MODIFICAT (redenumit + modificat)";
+                    else if (types.Count == 1)
+                        result = types[0];
+                    else
+                        result = string.Join(" + ", types.Distinct());
+
+                    Console.WriteLine($"[{result}] {group.Key}");
                 }
-            }
 
-            try
-            {
-                File.WriteAllLines("to_scan.txt", antivirusQueue.Keys);
+                Thread.Sleep(200);
             }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"[EROARE SCRIERE ANTIVIRUS] {ex.Message}");
-            }
-
-            Thread.Sleep(200);
         }
     }
 }
