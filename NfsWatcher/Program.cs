@@ -10,8 +10,7 @@ namespace MyNamespace
 {
     class MyClassCS
     {
-        private static readonly object eventLock = new();
-        private static readonly List<(string Type, string Path, string? OldPath, DateTime Time)> eventBuffer = new();
+        private static readonly ConcurrentBag<(string Type, string Path, string? OldPath, DateTime Time)> eventBuffer = new();
         private static readonly ConcurrentDictionary<Guid, string> eventDisplayMap = new();
         private static bool isRunning = true;
 
@@ -57,13 +56,42 @@ namespace MyNamespace
             Thread displayThread = new(DisplayEvents);
             displayThread.Start();
 
+            // Graceful shutdown handlers
+            Console.CancelKeyPress += (sender, e) =>
+            {
+                Console.WriteLine("\n[INFO] Ctrl+C detectat. Închidere...");
+                e.Cancel = true;
+                GracefulExit(processorThread, displayThread);
+            };
+
+            AppDomain.CurrentDomain.ProcessExit += (sender, e) =>
+            {
+                Console.WriteLine("\n[INFO] Aplicația se închide. Închidere...");
+                GracefulExit(processorThread, displayThread);
+            };
+
+            AppDomain.CurrentDomain.UnhandledException += (sender, e) =>
+            {
+                Console.WriteLine("\n[EROARE] Excepție neașteptată:");
+                if (e.ExceptionObject is Exception ex)
+                    Console.WriteLine(ex.Message);
+                GracefulExit(processorThread, displayThread);
+            };
+
             Console.WriteLine($"[INFO] Monitorizare pornită: {watchPath}");
             Console.WriteLine("Apasă Enter pentru a opri...");
             Console.ReadLine();
 
+            GracefulExit(processorThread, displayThread);
+        }
+
+        static void GracefulExit(Thread processorThread, Thread displayThread)
+        {
             isRunning = false;
             processorThread.Join();
             displayThread.Join();
+            Console.WriteLine("[INFO] Toate thread-urile s-au încheiat.");
+            Environment.Exit(0);
         }
 
         private static bool IsTemporaryFile(string path)
@@ -84,28 +112,19 @@ namespace MyNamespace
         private static void OnChanged(object sender, FileSystemEventArgs e)
         {
             if (IsTemporaryFile(e.FullPath)) return;
-            lock (eventLock)
-            {
-                eventBuffer.Add(("MODIFICAT", e.FullPath, null, DateTime.Now));
-            }
+            eventBuffer.Add(("MODIFICAT", e.FullPath, null, DateTime.Now));
         }
 
         private static void OnCreated(object sender, FileSystemEventArgs e)
         {
             if (IsTemporaryFile(e.FullPath)) return;
-            lock (eventLock)
-            {
-                eventBuffer.Add(("CREAT", e.FullPath, null, DateTime.Now));
-            }
+            eventBuffer.Add(("CREAT", e.FullPath, null, DateTime.Now));
         }
 
         private static void OnDeleted(object sender, FileSystemEventArgs e)
         {
             if (IsTemporaryFile(e.FullPath)) return;
-            lock (eventLock)
-            {
-                eventBuffer.Add(("STERS", e.FullPath, null, DateTime.Now));
-            }
+            eventBuffer.Add(("STERS", e.FullPath, null, DateTime.Now));
         }
 
         private static void OnRenamed(object sender, RenamedEventArgs e)
@@ -114,17 +133,11 @@ namespace MyNamespace
             string oldName = Path.GetFileName(e.OldFullPath).ToLowerInvariant();
             if (oldName.StartsWith(".goutputstream-"))
             {
-                lock (eventLock)
-                {
-                    eventBuffer.Add(("MODIFICAT", e.FullPath, null, DateTime.Now));
-                }
+                eventBuffer.Add(("MODIFICAT", e.FullPath, null, DateTime.Now));
                 return;
             }
 
-            lock (eventLock)
-            {
-                eventBuffer.Add(("REDENUMIT", e.FullPath, e.OldFullPath, DateTime.Now));
-            }
+            eventBuffer.Add(("REDENUMIT", e.FullPath, e.OldFullPath, DateTime.Now));
         }
 
         private static void OnError(object sender, ErrorEventArgs e)
@@ -143,20 +156,28 @@ namespace MyNamespace
 
         private static void ProcessEvents()
         {
-            while (isRunning || eventBuffer.Any())
+            while (isRunning || !eventBuffer.IsEmpty)
             {
-                List<(string Type, string Path, string? OldPath, DateTime Time)> toProcess;
+                var toProcess = new List<(string Type, string Path, string? OldPath, DateTime Time)>();
+                var now = DateTime.Now;
 
-                lock (eventLock)
+                var tempList = new List<(string Type, string Path, string? OldPath, DateTime Time)>();
+
+                while (eventBuffer.TryTake(out var e))
                 {
-                    var now = DateTime.Now;
-                    toProcess = eventBuffer
-                        .Where(e => (now - e.Time).TotalMilliseconds > 800)
-                        .ToList();
-
-                    foreach (var e in toProcess)
-                        eventBuffer.Remove(e);
+                    tempList.Add(e);
                 }
+
+                toProcess = tempList
+                    .Where(e => (now - e.Time).TotalMilliseconds > 800)
+                    .ToList();
+
+                var keepForLater = tempList
+                    .Where(e => (now - e.Time).TotalMilliseconds <= 800)
+                    .ToList();
+
+                foreach (var e in keepForLater)
+                    eventBuffer.Add(e);
 
                 var grouped = toProcess
                     .GroupBy(e => e.Path)
