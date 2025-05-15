@@ -8,16 +8,16 @@ using System.Collections.Concurrent;
 
 namespace MyNamespace
 {
-    public class ConcurrentHashSet<T>
+    public class ConcurrentHashSet
     {
-        private readonly ConcurrentDictionary<T, byte> _dict = new();
-        public bool Add(T item) => _dict.TryAdd(item, 0);
-        public bool Contains(T item) => _dict.ContainsKey(item);
-        public IEnumerable<T> Items => _dict.Keys;
+        private readonly ConcurrentDictionary<string, byte> _dict = new();
+        public bool Add(string item) => _dict.TryAdd(item, 0);
+        public bool Contains(string item) => _dict.ContainsKey(item);
+        public IEnumerable<string> Items => _dict.Keys;
     }
     class MyClassCS
     {
-        private static readonly ConcurrentDictionary<string, ConcurrentHashSet<string>> eventMap = new();
+        private static readonly ConcurrentHashSet eventMap = new();
         private static bool isRunning = true;
 
         static void Main()
@@ -111,8 +111,7 @@ namespace MyNamespace
 
         private static void AddEvent(string path, string type)
         {
-            var set = eventMap.GetOrAdd(path, _ => new ConcurrentHashSet<string>());
-            set.Add(type);
+            var set = eventMap.Add(path);
         }
 
         private static void OnChanged(object sender, FileSystemEventArgs e)
@@ -159,6 +158,8 @@ namespace MyNamespace
             Console.WriteLine("Stacktrace:");
             Console.WriteLine(ex.StackTrace);
             PrintException(ex.InnerException);
+
+            // stop process events task
         }
 
         private static void ProcessEvents()
