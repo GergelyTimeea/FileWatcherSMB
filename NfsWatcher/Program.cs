@@ -8,13 +8,6 @@ using System.Collections.Concurrent;
 
 namespace MyNamespace
 {
-    public class ConcurrentHashSet
-    {
-        private readonly ConcurrentDictionary<string, byte> _dict = new();
-        public bool Add(string item) => _dict.TryAdd(item, 0);
-        public bool Contains(string item) => _dict.ContainsKey(item);
-        public IEnumerable<string> Items => _dict.Keys;
-    }
     class MyClassCS
     {
         private static readonly ConcurrentHashSet eventMap = new();
@@ -48,7 +41,6 @@ namespace MyNamespace
 
             watcher.Changed += OnChanged;
             watcher.Created += OnCreated;
-            watcher.Deleted += OnDeleted;
             watcher.Renamed += OnRenamed;
             watcher.Error += OnError;
 
@@ -109,41 +101,29 @@ namespace MyNamespace
                    name == "thumbs.db";
         }
 
-        private static void AddEvent(string path, string type)
+        private static void AddEvent(string path)
         {
-            var set = eventMap.Add(path);
+            eventMap.Add(path);
         }
 
         private static void OnChanged(object sender, FileSystemEventArgs e)
         {
             if (IsTemporaryFile(e.FullPath)) return;
-            AddEvent(e.FullPath, "MODIFICAT");
+            AddEvent(e.FullPath);
         }
 
         private static void OnCreated(object sender, FileSystemEventArgs e)
         {
             if (IsTemporaryFile(e.FullPath)) return;
-            AddEvent(e.FullPath, "CREAT");
+            AddEvent(e.FullPath);
         }
 
-        private static void OnDeleted(object sender, FileSystemEventArgs e)
-        {
-            if (IsTemporaryFile(e.FullPath)) return;
-            AddEvent(e.FullPath, "STERS");
-        }
 
         private static void OnRenamed(object sender, RenamedEventArgs e)
         {
             if (IsTemporaryFile(e.FullPath) || IsTemporaryFile(e.OldFullPath)) return;
 
-            string oldName = Path.GetFileName(e.OldFullPath).ToLowerInvariant();
-            if (oldName.StartsWith(".goutputstream-"))
-            {
-                AddEvent(e.FullPath, "MODIFICAT");
-                return;
-            }
-
-            AddEvent(e.FullPath, "REDENUMIT");
+            AddEvent(e.FullPath);
         }
 
         private static void OnError(object sender, ErrorEventArgs e)
@@ -164,36 +144,21 @@ namespace MyNamespace
 
         private static void ProcessEvents()
         {
-            while (isRunning || !eventMap.IsEmpty)
+            while (isRunning || eventMap.Items.Any())
             {
-                var paths = eventMap.Keys.ToList(); // snapshot
+                var paths = eventMap.Items.ToList();
 
                 foreach (var path in paths)
                 {
-                    if (eventMap.TryRemove(path, out var typesSet))
-                    {
-                        var types = typesSet.Items.ToList();
-                        string result;
+                    eventMap.Remove(path);
 
-                        if (types.Contains("STERS") && types.Contains("CREAT") && types.Contains("MODIFICAT"))
-                            result = "MODIFICAT (înlocuit)";
-                        else if (types.Contains("STERS") && types.Contains("CREAT"))
-                            result = "REDENUMIT (posibil mutat)";
-                        else if (types.Contains("CREAT") && types.Contains("MODIFICAT"))
-                            result = "CREAT + scan antivirus";
-                        else if (types.Contains("REDENUMIT") && types.Contains("MODIFICAT"))
-                            result = "MODIFICAT (redenumit + modificat)";
-                        else if (types.Count == 1)
-                            result = types[0];
-                        else
-                            result = string.Join(" + ", types.Distinct());
-
-                        Console.WriteLine($"[{result}] {path}");
-                    }
+                    Console.WriteLine($"[Eveniment] {path}");
                 }
 
                 Thread.Sleep(500);
             }
         }
+
+
     }
 }
