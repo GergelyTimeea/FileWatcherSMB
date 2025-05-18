@@ -1,10 +1,13 @@
-﻿using System;
-using System.IO;
-using Microsoft.Extensions.Configuration;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
+﻿using Microsoft.Extensions.Configuration;
+using RabbitMQ.Client;
+using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text;
+using System.Threading;
+
 
 namespace MyNamespace
 {
@@ -153,6 +156,9 @@ namespace MyNamespace
                     eventMap.Remove(path);
 
                     Console.WriteLine($"[Eveniment] {path}");
+
+                    _ = RabbitMqProducer.SendMessageAsync($"Eveniment: {path}");
+
                 }
 
                 Thread.Sleep(500);

@@ -1,0 +1,15 @@
+version: '3'
+services:
+  rabbitmq:
+    image: "rabbitmq:management"
+    container_name: rabbitmq
+    ports:
+      - "15672:15672"  # Port pentru accesul la management UI
+      - "5672:5672"    # Portul AMQP pentru RabbitMQ
+    environment:
+      - RABBITMQ_DEFAULT_USER=admin  # utilizator default
+      - RABBITMQ_DEFAULT_PASS=admin  # parola pentru utilizator
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq  # persistă datele RabbitMQ
+volumes:
+  rabbitmq_data:
