@@ -11,5 +11,19 @@ services:
       - RABBITMQ_DEFAULT_PASS=admin  # parola pentru utilizator
     volumes:
       - rabbitmq_data:/var/lib/rabbitmq  # persistă datele RabbitMQ
+  watcher:
+    build:
+      context: .               # același folder unde ai Dockerfile și .csproj
+      dockerfile: Dockerfile
+    container_name: file-watcher
+    depends_on:
+      - rabbitmq
+    environment:
+      # suprascrie cheia din appsettings.json
+      NfsWatcher__WatchPath: /watched
+    volumes:
+      # montează folderul local pe care vrei să-l monitorizezi
+      - "/mnt/z/:/watched:ro"
+ 
 volumes:
   rabbitmq_data:
