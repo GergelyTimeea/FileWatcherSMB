@@ -24,6 +24,13 @@ namespace MyNamespace
                 .AddEnvironmentVariables()
                 .Build();
 
+            var rabbitSettings = config
+                .GetSection("RabbitMq")
+                .Get<RabbitMqOptions>()
+                ?? throw new InvalidOperationException("Lip­seste sectiunea RabbitMq în appsettings.json");
+
+            var producer = new RabbitMqProducer(rabbitSettings);
+
             string? watchPath = config["NfsWatcher:WatchPath"];
 
             if (string.IsNullOrWhiteSpace(watchPath) || !Directory.Exists(watchPath))
@@ -52,7 +59,7 @@ namespace MyNamespace
             watcher.IncludeSubdirectories = true;
             watcher.EnableRaisingEvents = true;
 
-            Thread processorThread = new(ProcessEvents);
+            Thread processorThread = new(() => ProcessEvents(producer));
             processorThread.Start();
 
             Console.CancelKeyPress += (sender, e) =>
@@ -146,7 +153,7 @@ namespace MyNamespace
             // stop process events task
         }
 
-        private static void ProcessEvents()
+        private static void ProcessEvents(RabbitMqProducer producer)
         {
             while (isRunning || eventMap.Items.Any())
             {
@@ -158,7 +165,7 @@ namespace MyNamespace
 
                     Console.WriteLine($"[Eveniment] {path}");
 
-                    _ = RabbitMqProducer.SendMessageAsync($"Eveniment: {path}");
+                    _ = producer.SendMessageAsync($"Eveniment: {path}");
 
                 }
 

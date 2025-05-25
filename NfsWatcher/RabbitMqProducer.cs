@@ -9,16 +9,27 @@ namespace MyNamespace
 {
     public class RabbitMqProducer
     {
-        private const string QueueName = "eventsQueue";
+        private readonly ConnectionFactory _factory;
+        private readonly string _queueName;
 
-        public static async Task SendMessageAsync(string message)
+        public RabbitMqProducer(RabbitMqOptions settings)
         {
-            var factory = new ConnectionFactory() { HostName = "localhost", UserName = "admin", Password = "admin" };
+            _factory = new ConnectionFactory
+            {
+                HostName = settings.HostName,
+                UserName = settings.UserName,
+                Password = settings.Password
+            };
+            _queueName = settings.QueueName;
+        }
 
-            await using IConnection connection = await factory.CreateConnectionAsync();
+        public async Task SendMessageAsync(string message)
+        {
+
+            await using IConnection connection = await _factory.CreateConnectionAsync();
             await using IChannel channel = await connection.CreateChannelAsync();
 
-            await channel.QueueDeclareAsync(queue: QueueName,
+            await channel.QueueDeclareAsync(queue: _queueName,
                                  durable: false,
                                  exclusive: false,
                                  autoDelete: false,
@@ -30,7 +41,7 @@ namespace MyNamespace
 
             await channel.BasicPublishAsync(
                             exchange: "",
-                            routingKey: QueueName,
+                            routingKey: _queueName,
                             mandatory: false,
                             basicProperties: props,
                             body: body);
