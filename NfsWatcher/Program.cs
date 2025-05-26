@@ -5,9 +5,8 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
-
 
 namespace MyNamespace
 {
@@ -15,6 +14,7 @@ namespace MyNamespace
     {
         private static readonly ConcurrentHashSet eventMap = new();
         private static bool isRunning = true;
+        private static TempFileFilter? _tempFileFilter;
 
         static void Main()
         {
@@ -38,6 +38,10 @@ namespace MyNamespace
                 Console.WriteLine($"[EROARE] Calea nu este validă sau nu există: {watchPath}");
                 return;
             }
+
+            // Load regex ignore patterns
+            var ignorePatterns = config.GetSection("NfsWatcher:IgnorePatterns").Get<List<string>>() ?? new();
+            _tempFileFilter = new TempFileFilter(ignorePatterns);
 
             using var watcher = new FileSystemWatcher(watchPath);
 
@@ -98,42 +102,31 @@ namespace MyNamespace
             Environment.Exit(0);
         }
 
-        private static bool IsTemporaryFile(string path)
-        {
-            string name = Path.GetFileName(path).ToLowerInvariant();
-            return name.StartsWith("~$") ||
-                   name.StartsWith(".~lock.") ||
-                   name.StartsWith(".goutputstream-") ||
-                   name.EndsWith(".tmp") ||
-                   name.EndsWith(".temp") ||
-                   name.EndsWith(".swp") ||
-                   name.EndsWith(".swx") ||
-                   name == ".ds_store" ||
-                   name == "thumbs.db";
-        }
-
         private static void AddEvent(string path)
         {
             eventMap.Add(path);
         }
 
+        private static bool ShouldIgnore(string path)
+        {
+            return _tempFileFilter?.IsTemporary(path) ?? false;
+        }
+
         private static void OnChanged(object sender, FileSystemEventArgs e)
         {
-            if (IsTemporaryFile(e.FullPath)) return;
+            if (ShouldIgnore(e.FullPath)) return;
             AddEvent(e.FullPath);
         }
 
         private static void OnCreated(object sender, FileSystemEventArgs e)
         {
-            if (IsTemporaryFile(e.FullPath)) return;
+            if (ShouldIgnore(e.FullPath)) return;
             AddEvent(e.FullPath);
         }
 
-
         private static void OnRenamed(object sender, RenamedEventArgs e)
         {
-            if (IsTemporaryFile(e.FullPath) || IsTemporaryFile(e.OldFullPath)) return;
-
+            if (ShouldIgnore(e.FullPath) || ShouldIgnore(e.OldFullPath)) return;
             AddEvent(e.FullPath);
         }
 
@@ -149,8 +142,6 @@ namespace MyNamespace
             Console.WriteLine("Stacktrace:");
             Console.WriteLine(ex.StackTrace);
             PrintException(ex.InnerException);
-
-            // stop process events task
         }
 
         private static void ProcessEvents(RabbitMqProducer producer)
@@ -162,17 +153,31 @@ namespace MyNamespace
                 foreach (var path in paths)
                 {
                     eventMap.Remove(path);
-
                     Console.WriteLine($"[Eveniment] {path}");
-
                     _ = producer.SendMessageAsync($"Eveniment: {path}");
-
                 }
 
                 Thread.Sleep(500);
             }
         }
+    }
 
+    public class TempFileFilter
+    {
+        private readonly List<Regex> _ignoreRegexes;
 
+        public TempFileFilter(IEnumerable<string> patterns)
+        {
+            _ignoreRegexes = patterns
+                .Where(p => !string.IsNullOrWhiteSpace(p))
+                .Select(p => new Regex(p, RegexOptions.IgnoreCase | RegexOptions.Compiled))
+                .ToList();
+        }
+
+        public bool IsTemporary(string path)
+        {
+            string fileName = Path.GetFileName(path);
+            return _ignoreRegexes.Any(regex => regex.IsMatch(fileName));
+        }
     }
 }
