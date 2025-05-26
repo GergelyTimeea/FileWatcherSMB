@@ -127,3 +127,50 @@ Pe Windows, folderul a fost montat cu următorii pași:
 
 7. Am introdus userul ```user_name``` și parola setată cu ```smbpasswd -a user_name```
 
+ ## Configurare RabbitMQ & Docker
+ ### Despre RabbitMQ
+ RabbitMQ este un broker de mesaje open-source care implementează protocolul AMQP și izolează producătorii de consumatori prin intermediul cozilor. Acesta asigură trimiterea sigură și ordonată a mesajelor între părţi independente ale unui sistem.
+ ### Despre Docker
+ Docker este o platformă open-source care permite rularea aplicațiilor în medii izolate, consistente și portabile:
+ - **Imagine**: definiția completă a mediului de execuție, creată dintr-un `Dockerfile`
+ - **Container**: instanță rulantă a imaginii
+ - **Docker Compose**: orchestrează mai multe containere dintr-un fișier YAML
+
+### Implementare în .NET
+
+#### Clasa `RabbitMqProducer`
+`RabbitMqProducer` gestionează trimiterea **asincronă** a mesajelor către coada RabbitMQ configurată. Când se apelează `SendMessageAsync(string message)`:
+1. Se deschide asincron o conexiune și un canal (`CreateConnectionAsync()` și `CreateChannelAsync()`).
+2. Se declară coada cu `QueueDeclareAsync()`.
+3. Mesajul, convertit în UTF-8, este publicat prin `BasicPublishAsync()`, astfel încât operaţiile de reţea să nu blocheze execuția principală.
+4. Metoda returnează un `Task` care se completează când brokerul confirmă primirea mesajului, iar în consolă apare o linie cu textul trimis.
+
+### Dockerfile
+Fișierul `Dockerfile` folosește un build în două etape pentru a optimiza dimensiunea şi viteza imaginii:
+1. **Build stage**
+   - Pornim de la `mcr.microsoft.com/dotnet/sdk:9.0`, instalăm dependențele cu `dotnet restore` şi publicăm aplicația în folderul `/app/publish`.
+   - Această etapă conține tot SDK-ul necesar pentru compilare, dar nu intră în imaginea finală.
+
+2. **Runtime stage**
+   - Pornim de la `mcr.microsoft.com/dotnet/aspnet:9.0`, o imagine mai mică care include doar runtime-ul .NET.
+   - Copiem în `/app` rezultatul publicării şi setăm `ENTRYPOINT` la rularea `FileWatcherSMB.dll`.
+
+### docker-compose.yml
+Fişierul `docker-compose.yml` orchestrează cele două servicii principale şi volumul necesar:
+- **Services**
+  - **rabbitmq**: rulează brokerul cu management UI, expune porturile `5672` (AMQP) și `15672` (web UI), şi stochează datele într-un volum persistent (`rabbitmq_data`).
+  - **watcher**: construiește containerul .NET din `Dockerfile`, aşteaptă RabbitMQ (`depends_on`), primeşte configuraţia de watch şi conexiune prin variabile de mediu și montează folderul local read-only pentru monitorizare.
+- **Volumes** – defineşte `rabbitmq_data` pentru a păstra mesajele RabbitMQ peste restart-uri de containere.
+
+### Utilizare
+1. Deschide Docker Desktop
+2. Într-un terminal, navighează în directorul proiectului (unde se află `docker-compose.yml`) și execută:
+```
+docker-compose up --build
+```
+3. Accesează RabbitMQ Management UI în browser `http://localhost:15672`
+4. Autentifică-te cu user și parolă: `admin/admin`
+5. Pentru oprire apasă `Ctrl+C` în terminalul unde ai pornit docker-compose și apoi, pentru a curăța complet containerele și volumul, rulează:
+```
+docker-compose down --volumes
+```
