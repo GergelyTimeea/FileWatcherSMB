@@ -1,4 +1,8 @@
+<<<<<<< HEAD
 services:
+=======
+﻿services:
+>>>>>>> ea6ac57 (Project refactoring: new structure + interfaces + abstractions)
   rabbitmq:
     image: "rabbitmq:management"
     container_name: rabbitmq
