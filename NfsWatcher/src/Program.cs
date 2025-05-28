@@ -1,131 +1,81 @@
-﻿using Microsoft.Extensions.Configuration;
-using System.Text.RegularExpressions;
-using FileWatcherSMB.Helpers;
+﻿using FileWatcherSMB.Helpers;
 using FileWatcherSMB.Models;
 using FileWatcherSMB.Services;
+using FileWatcherSMB.src.Helpers;
+using FileWatcherSMB.src.Processors;
+using FileWatcherSMB.src.Watchers;
+using FileWatcherSMB.Watchers;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using System;
+using System.IO;
+using System.Threading;
 
 namespace FileWatcherSMB
 {
     class Program
     {
-        private static IConcurrentHashSet eventMap = new ConcurrentHashSet();
-        private static bool isRunning = true;
-        private static IRabbitMqProducer producer;
-
-        static void Main()
+        static async Task Main(string[] args)
         {
-            IConfiguration config = new ConfigurationBuilder()
-                .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
-                .AddEnvironmentVariables()
+            IHost host = Host.CreateDefaultBuilder(args)
+                .ConfigureLogging(logging =>
+                {
+                    logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.None);
+
+                    logging.AddFilter("Microsoft", LogLevel.Warning);
+                })
+                .ConfigureAppConfiguration((context, cfg) =>
+                {
+                    cfg.SetBasePath(Directory.GetCurrentDirectory())
+                       .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+                       .AddEnvironmentVariables();
+                })
+                .ConfigureServices((context, services) =>
+                {
+                    var config = context.Configuration;
+
+                    var ignorePatterns = config
+                        .GetSection("NfsWatcher:IgnorePatterns")
+                        .Get<List<string>>() ?? new List<string>();
+
+                    services.AddSingleton<ITempFileFilter>(new TempFileFilter(ignorePatterns));
+
+                    services.AddSingleton<IConcurrentHashSet, ConcurrentHashSet>();
+
+                    services.AddSingleton<IFileWatcher>(sp =>
+                    {
+                        var path = config["NfsWatcher:WatchPath"];
+                        if (string.IsNullOrWhiteSpace(path) || !Directory.Exists(path))
+                        {
+                            throw new InvalidOperationException($"Calea nu este validă: {path}");
+                        }
+                        return new FileWatcherWrapper(path, sp.GetRequiredService<IConcurrentHashSet>(), sp.GetRequiredService<ITempFileFilter>());
+                    });
+
+                    services.AddSingleton<IRabbitMqProducer>(sp =>
+                    {
+                        var rabbitSettings = config
+                            .GetSection("RabbitMq")
+                            .Get<RabbitMqOptions>()
+                            ?? throw new InvalidOperationException("Lipsește RabbitMq din config");
+                        return new RabbitMqProducer(rabbitSettings);
+                    });
+
+                    services.AddHostedService<FileEventProcessor>();
+                })
                 .Build();
 
-            var rabbitSettings = config
-                .GetSection("RabbitMq")
-                .Get<RabbitMqOptions>() ?? throw new InvalidOperationException("Lipsește RabbitMq din config");
+            var watcher = host.Services.GetRequiredService<IFileWatcher>();
+            watcher.Start();
+            Console.WriteLine($"[INFO] Monitorizare pornită.");
 
-            producer = new RabbitMqProducer(rabbitSettings);
+            await host.RunAsync();
 
-            string? watchPath = config["NfsWatcher:WatchPath"];
-
-            if (string.IsNullOrWhiteSpace(watchPath) || !Directory.Exists(watchPath))
-            {
-                Console.WriteLine($"[EROARE] Calea nu este validă: {watchPath}");
-                return;
-            }
-
-            using var watcher = new FileSystemWatcher(watchPath)
-            {
-                NotifyFilter = NotifyFilters.Attributes
-                             | NotifyFilters.CreationTime
-                             | NotifyFilters.DirectoryName
-                             | NotifyFilters.FileName
-                             | NotifyFilters.LastAccess
-                             | NotifyFilters.LastWrite
-                             | NotifyFilters.Security
-                             | NotifyFilters.Size,
-                Filter = "*.*",
-                IncludeSubdirectories = true,
-                EnableRaisingEvents = true
-            };
-
-            watcher.Changed += OnChanged;
-            watcher.Created += OnCreated;
-            watcher.Renamed += OnRenamed;
-            watcher.Error += OnError;
-
-            var processorThread = new Thread(ProcessEvents);
-            processorThread.Start();
-
-            Console.CancelKeyPress += (s, e) =>
-            {
-                e.Cancel = true;
-                GracefulExit(processorThread);
-            };
-
-            AppDomain.CurrentDomain.ProcessExit += (s, e) => GracefulExit(processorThread);
-
-            Console.WriteLine($"[INFO] Monitorizare pornită: {watchPath}");
-            Console.ReadLine();
-            GracefulExit(processorThread);
-        }
-
-        private static void GracefulExit(Thread processorThread)
-        {
-            isRunning = false;
-            processorThread.Join();
+            watcher.Stop();
             Console.WriteLine("[INFO] Monitorizarea s-a încheiat.");
-            Environment.Exit(0);
-        }
 
-        private static readonly Regex tempFileRegex = new(
-            "(^~\\$|\\.tmp$|\\.temp$|\\.swp$|\\.swx$|\\.ds_store$|thumbs\\.db$|^\\.~lock\\.|^\\.goutputstream-)",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-        private static bool IsTemporaryFile(string path)
-        {
-            string name = Path.GetFileName(path);
-            return tempFileRegex.IsMatch(name);
-        }
-
-        private static void AddEvent(string path)
-        {
-            eventMap.Add(path);
-        }
-
-        private static void OnChanged(object sender, FileSystemEventArgs e)
-        {
-            if (!IsTemporaryFile(e.FullPath)) AddEvent(e.FullPath);
-        }
-
-        private static void OnCreated(object sender, FileSystemEventArgs e)
-        {
-            if (!IsTemporaryFile(e.FullPath)) AddEvent(e.FullPath);
-        }
-
-        private static void OnRenamed(object sender, RenamedEventArgs e)
-        {
-            if (!IsTemporaryFile(e.FullPath)) AddEvent(e.FullPath);
-        }
-
-        private static void OnError(object sender, ErrorEventArgs e)
-        {
-            Console.WriteLine($"[EROARE] {e.GetException()?.Message}");
-        }
-
-        private static async void ProcessEvents()
-        {
-            while (isRunning || eventMap.Items.Any())
-            {
-                var paths = eventMap.Items.ToList();
-                foreach (var path in paths)
-                {
-                    eventMap.Remove(path);
-                    Console.WriteLine($"[Eveniment] {path}");
-                    await producer.SendMessageAsync($"Eveniment: {path}");
-                }
-                Thread.Sleep(500);
-            }
         }
     }
 }

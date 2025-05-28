@@ -1,5 +1,6 @@
 ﻿using RabbitMQ.Client;
 using System.Text;
+using FileWatcherSMB.Models;
 
 namespace FileWatcherSMB.Services
 {
