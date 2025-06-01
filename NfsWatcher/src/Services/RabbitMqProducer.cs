@@ -1,6 +1,7 @@
 ﻿using RabbitMQ.Client;
 using System.Text;
 using FileWatcherSMB.Models;
+using Microsoft.Extensions.Logging;
 
 namespace FileWatcherSMB.Services
 {
@@ -8,8 +9,9 @@ namespace FileWatcherSMB.Services
     {
         private readonly ConnectionFactory _factory;
         private readonly string _queueName;
+        private readonly ILogger<RabbitMqProducer> _logger;
 
-        public RabbitMqProducer(RabbitMqOptions options)
+        public RabbitMqProducer(RabbitMqOptions options, ILogger<RabbitMqProducer> logger)
         {
             _factory = new ConnectionFactory
             {
@@ -18,6 +20,7 @@ namespace FileWatcherSMB.Services
                 Password = options.Password
             };
             _queueName = options.QueueName;
+            _logger = logger;
         }
 
         public async Task SendMessageAsync(string message)
@@ -26,16 +29,16 @@ namespace FileWatcherSMB.Services
             await using IChannel channel = await connection.CreateChannelAsync();
 
             await channel.QueueDeclareAsync(queue: _queueName,
-                                             durable: false,
-                                             exclusive: false,
-                                             autoDelete: false,
-                                             arguments: null);
+                                            durable: false,
+                                            exclusive: false,
+                                            autoDelete: false,
+                                            arguments: null);
 
             var body = Encoding.UTF8.GetBytes(message);
             var props = new BasicProperties();
 
             await channel.BasicPublishAsync("", _queueName, false, props, body);
-            Console.WriteLine($"[x] Mesaj trimis: {message}");
+            _logger.LogInformation("[x] Mesaj trimis: {Message}", message);
         }
     }
 }

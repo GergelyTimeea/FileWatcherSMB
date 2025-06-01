@@ -22,8 +22,9 @@ namespace FileWatcherSMB
             IHost host = Host.CreateDefaultBuilder(args)
                 .ConfigureLogging(logging =>
                 {
+                    logging.ClearProviders();
+                    logging.AddConsole();
                     logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.None);
-
                     logging.AddFilter("Microsoft", LogLevel.Warning);
                 })
                 .ConfigureAppConfiguration((context, cfg) =>
@@ -41,7 +42,6 @@ namespace FileWatcherSMB
                         .Get<List<string>>() ?? new List<string>();
 
                     services.AddSingleton<ITempFileFilter>(new TempFileFilter(ignorePatterns));
-
                     services.AddSingleton<IConcurrentHashSet, ConcurrentHashSet>();
 
                     services.AddSingleton<IFileWatcher>(sp =>
@@ -51,7 +51,13 @@ namespace FileWatcherSMB
                         {
                             throw new InvalidOperationException($"Calea nu este validă: {path}");
                         }
-                        return new FileWatcherWrapper(path, sp.GetRequiredService<IConcurrentHashSet>(), sp.GetRequiredService<ITempFileFilter>());
+
+                        return new FileWatcherWrapper(
+                            path,
+                            sp.GetRequiredService<IConcurrentHashSet>(),
+                            sp.GetRequiredService<ITempFileFilter>(),
+                            sp.GetRequiredService<ILogger<FileWatcherWrapper>>()
+                        );
                     });
 
                     services.AddSingleton<IRabbitMqProducer>(sp =>
@@ -60,7 +66,11 @@ namespace FileWatcherSMB
                             .GetSection("RabbitMq")
                             .Get<RabbitMqOptions>()
                             ?? throw new InvalidOperationException("Lipsește RabbitMq din config");
-                        return new RabbitMqProducer(rabbitSettings);
+
+                        return new RabbitMqProducer(
+                            rabbitSettings,
+                            sp.GetRequiredService<ILogger<RabbitMqProducer>>()
+                        );
                     });
 
                     services.AddHostedService<FileEventProcessor>();
@@ -69,13 +79,14 @@ namespace FileWatcherSMB
 
             var watcher = host.Services.GetRequiredService<IFileWatcher>();
             watcher.Start();
-            Console.WriteLine($"[INFO] Monitorizare pornită.");
+
+            var logger = host.Services.GetRequiredService<ILogger<Program>>();
+            logger.LogInformation("Monitorizare pornită.");
 
             await host.RunAsync();
 
             watcher.Stop();
-            Console.WriteLine("[INFO] Monitorizarea s-a încheiat.");
-
+            logger.LogInformation("Monitorizarea s-a încheiat.");
         }
     }
 }

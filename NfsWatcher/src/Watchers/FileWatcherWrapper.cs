@@ -8,6 +8,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using static System.Runtime.InteropServices.JavaScript.JSType;
+using Microsoft.Extensions.Logging;
 
 namespace FileWatcherSMB.src.Watchers
 {
@@ -16,11 +17,14 @@ namespace FileWatcherSMB.src.Watchers
         private readonly FileSystemWatcher _watcher;
         private readonly IConcurrentHashSet _eventMap;
         private readonly ITempFileFilter _filter;
+        private readonly ILogger<FileWatcherWrapper> _logger;
 
-        public FileWatcherWrapper(string pathToWatch, IConcurrentHashSet eventMap, ITempFileFilter filter)
+        public FileWatcherWrapper(string pathToWatch, IConcurrentHashSet eventMap, ITempFileFilter filter, ILogger<FileWatcherWrapper> logger)
         {
             _eventMap = eventMap;
             _filter = filter;
+            _logger = logger;
+
             _watcher = new FileSystemWatcher(pathToWatch)
             {
                 NotifyFilter = NotifyFilters.Attributes
@@ -56,6 +60,7 @@ namespace FileWatcherSMB.src.Watchers
             if (_filter.IsIgnored(e.FullPath)) return;
             _eventMap.Add(e.FullPath);
         }
+
         private void OnFileCreated(object sender, FileSystemEventArgs e)
         {
             if (_filter.IsIgnored(e.FullPath)) return;
@@ -66,19 +71,18 @@ namespace FileWatcherSMB.src.Watchers
         {
             if (_filter.IsIgnored(e.OldFullPath) || _filter.IsIgnored(e.FullPath))
                 return;
+
             _eventMap.Add(e.FullPath);
         }
 
-        private static void OnFileError(object sender, ErrorEventArgs e)
+        private void OnFileError(object sender, ErrorEventArgs e)
         {
-            Console.WriteLine($"[EROARE] {e.GetException()?.Message}");
+            _logger.LogError(e.GetException(), "Eroare la monitorizarea fișierului.");
         }
 
         public void Dispose()
-        { 
-            _watcher.Dispose(); 
+        {
+            _watcher.Dispose();
         }
-
-
     }
 }
