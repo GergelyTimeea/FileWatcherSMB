@@ -57,19 +57,19 @@ namespace FileWatcherSMB.src.Watchers
 
         private void OnFileChanged(object sender, FileSystemEventArgs e)
         {
-            if (_filter.IsIgnored(e.FullPath)) return;
+            if (_filter.IsTemporaryOrIgnoredFile(e.FullPath)) return;
             _eventMap.Add(e.FullPath);
         }
 
         private void OnFileCreated(object sender, FileSystemEventArgs e)
         {
-            if (_filter.IsIgnored(e.FullPath)) return;
+            if (_filter.IsTemporaryOrIgnoredFile(e.FullPath)) return;
             _eventMap.Add(e.FullPath);
         }
 
         private void OnFileRenamed(object sender, RenamedEventArgs e)
         {
-            if (_filter.IsIgnored(e.OldFullPath) || _filter.IsIgnored(e.FullPath))
+            if (_filter.IsTemporaryOrIgnoredFile(e.OldFullPath) || _filter.IsTemporaryOrIgnoredFile(e.FullPath))
                 return;
 
             _eventMap.Add(e.FullPath);

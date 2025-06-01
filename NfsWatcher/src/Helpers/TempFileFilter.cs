@@ -19,7 +19,7 @@ namespace FileWatcherSMB.src.Helpers
                 .ToArray();
         }
 
-        public bool IsIgnored(string fullPath)
+        public bool IsTemporaryOrIgnoredFile(string fullPath)
         {
             var fileName = Path.GetFileName(fullPath);
             return _patterns.Any(r => r.IsMatch(fileName));

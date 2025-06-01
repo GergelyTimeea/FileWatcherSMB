@@ -8,6 +8,6 @@ namespace FileWatcherSMB.src.Helpers
 {
     public interface ITempFileFilter
     {
-        bool IsIgnored(string fullPath);
+        bool IsTemporaryOrIgnoredFile(string fullPath);
     }
 }
