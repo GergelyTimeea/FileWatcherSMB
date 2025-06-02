@@ -1,62 +1,52 @@
 # FileWatcherSMB
 
-Un proiect .NET complet care monitorizează în timp real fișierele dintr-un folder partajat SMB și transmite evenimentele detectate către o coadă RabbitMQ, utilizând un sistem asincron eficient.
+A complete .NET project that monitors files in a shared SMB folder in real-time and sends detected events to a RabbitMQ queue using an efficient asynchronous system.
 
-## Introducere
+## Introduction
 
-FileWatcherSMB este o aplicație care automatizează procesul de urmărire a fișierelor dintr-un director SMB partajat de o mașină virtuală Ubuntu, montat pe un sistem Windows. Acest proiect urmărește să creeze un sistem de logare și procesare în timp real a evenimentelor de fișier (creare, modificare, redenumire), folosind tehnologii moderne precum:
+FileWatcherSMB is an application that automates the process of tracking files in an SMB directory shared by an Ubuntu virtual machine, mounted on a Windows system. This project aims to create a real-time logging and processing system for file events (create, modify, rename), using modern technologies such as:
 
-- SMB pentru partajarea fișierelor între mașini
+- SMB for file sharing between machines
+- FileSystemWatcher from .NET for local monitoring
+- RabbitMQ for messaging and decoupling the processing flow
+- Docker for quick and isolated RabbitMQ deployment
 
-- FileSystemWatcher din .NET pentru monitorizarea locală
+## SMB Connection and File Monitoring
 
-- RabbitMQ pentru mesagerie și decuplarea fluxului de procesare
+### Technical Context
 
-- Docker pentru rularea rapidă și izolată a RabbitMQ
+SMB (Server Message Block) is a network protocol for file sharing between different devices. In this project, the Ubuntu virtual machine acts as an SMB server, and the host Windows system mounts that shared folder as a local drive.
 
- ## Conectarea SMB și Monitorizarea Fișierelor
+### SMB Server – Configuration on Ubuntu
 
-### Context tehnic
-
-SMB (Server Message Block) este un protocol de rețea pentru partajarea fișierelor între diferite dispozitive. În acest proiect, mașina virtuală cu Ubuntu acționează ca server SMB, iar Windows-ul gazdă montează acel folder partajat ca unitate locală.
-
-### Server SMB – configurare pe Ubuntu
-
-
-1. Pe serverul Ubuntu (VM), am instalat și configurat samba:
+1. On the Ubuntu server (VM), we installed and configured Samba:
 ```
 sudo apt update
 sudo apt install samba
 ```
-Explicație:
+Explanation:
 
-* ```apt update``` actualizează lista de pachete.
+- ```apt update``` updates the package list.
+- ```apt install samba``` installs Samba — the software that allows file sharing between Linux and Windows.
 
-* ```apt install samba``` instalează Samba — software-ul care permite partajarea fișierelor între Linux și Windows.
-
-
-2. Crearea folderului care va fi partajat
-
+2. Creating the folder to be shared
 ```
 mkdir -p /home/user_name/smbshare
 ```
-Explicație:
+Explanation:
 
-* Creezi folderul pe care vrei să-l partajezi.
-
-* ```-p``` creează și directoarele părinte dacă nu există (```home/user_name``` în acest caz).
+- You create the folder you want to share.
+- ```-p``` also creates parent directories if they don’t exist (```home/user_name``` in this case).
 ```
 sudo chown timi:timi /home/user_name/smbshare
 ```
-* Asta asigură că utilizatorul ```user_name``` are drepturi de scriere în folderul partajat.
+- This ensures that the ```user_name``` has write permissions to the shared folder.
 
-
- 3. Adăugarea configurării în fișierul ```smb.conf```
-
+3. Adding the configuration to the ```smb.conf``` file
 ```
 sudo nano /etc/samba/smb.conf
 ```
-Adaugi la finalul fișierului:
+Add at the end of the file:
 ```
 [smbshare]
    path = /home/user_name/smbshare
@@ -65,285 +55,272 @@ Adaugi la finalul fișierului:
    guest ok = no
    valid users = user_name
 ```
-Explicație:
+Explanation:
 
-* ```[smbshare]``` – numele cu care va apărea folderul în rețea.
+- ```[smbshare]``` – the name that will appear in the network.
+- ```path``` – the actual folder location.
+- ```browseable``` = yes – allows it to be visible on the network.
+- ```read only``` = no – grants write permission.
+- ```guest ok``` = no – disallows anonymous access.
+- ```valid users``` = user_name – only the ```user_name``` can access it.
 
-* ```path``` – locația reală a folderului.
-
-* ```browseable``` = yes – permite să fie vizibil în rețea.
-
-* ```read only``` = no – oferă permisiune de scriere.
-
-* ```guest ok``` = no – nu permite acces anonim.
-
-* ```valid users``` = user_name – doar utilizatorul ```user_name``` poate accesa.
-
-
- 4. Crearea unui utilizator Samba
-
+4. Creating a Samba user
 ```
 sudo smbpasswd -a user_name
 ```
-Explicație:
+Explanation:
 
-* Adaugă utilizatorul ```user_name``` în sistemul Samba și setează o parolă.
+- Adds the ```user_name``` to the Samba system and sets a password.
+- The user must already exist on the Ubuntu system.
 
-* Trebuie să existe deja ca utilizator în Ubuntu.
-
-
- 5. Repornirea serviciului Samba
-
+5. Restarting the Samba service
 ```
 sudo systemctl restart smbd
 ```
-Explicație:
+Explanation:
 
-* Aplică noile modificări din fișierul ```smb.conf.```
+- Applies the new changes made to the ```smb.conf``` file.
 
+### Mounting the Share on Windows
 
-### Montarea partajării pe Windows
+On Windows, the folder was mounted using the following steps:
 
-Pe Windows, folderul a fost montat cu următorii pași:
-1. **Deschide File Explorer** → click pe **This PC**
-
-2. **Click dreapta** în fereastră → **Map network drive**
-
-3. Am ales **Z:**
-
-4. La **Folder**, am scris:
-
+1. **Open File Explorer** → click on **This PC**
+2. **Right-click** in the window → **Map network drive**
+3. Chose **Z:**
+4. Under **Folder**, entered:
 ```
 \\192.168.1.10\smbshare
 ```
-(înlocuiește IP-ul cu adresa IP a Ubuntu-ului tău, și ```smbshare``` cu numele partajării din smb.conf)
+(Replace the IP with your Ubuntu's IP address, and ```smbshare``` with the share name from smb.conf)
 
-5. Am bifat :
+5. Checked:
 
-* _ _Reconnect at sign-in_ _ – ca să se reconecteze automat după restart
-
+- _ _Reconnect at sign-in_ _ – so it reconnects automatically after restart
 
 6. Click **Finish**
-
-7. Am introdus userul ```user_name``` și parola setată cu ```smbpasswd -a user_name```
-
----
-## Structura Principală a Fișierelor Aplicației
-
-Mai jos este prezentată structura principală a fișierelor proiectului și scopul fiecăruia.
+7. Entered the user ```user_name``` and the password set with ```smbpasswd -a user_name```
 
 ---
+
+## Main Application File Structure
+
+Below is the main file structure of the project and the purpose of each.
 
 ### 1. `Program.cs`
 
-**Scop:**  
-Acesta este punctul de intrare și logica principală a aplicației.
+**Purpose:**  
+This is the entry point and the main logic of the application.
 
-**Utilizare:**
-- Încarcă valorile de configurare din `appsettings.json` (precum directorul care trebuie monitorizat).
-- Inițializează și configurează un `FileSystemWatcher` pentru a urmări modificările fișierelor (creare, modificare, redenumire).
-- Filtrează fișierele temporare sau irelevante pentru a evita evenimentele zgomotoase sau redundante.
-- Utilizează un cache de evenimente thread-safe și deduplicat (`ConcurrentHashSet`) pentru a stoca modificările detectate înainte de procesare.
-- Rulează un thread de fundal care procesează periodic evenimentele în așteptare, le înregistrează în loguri și le trimite către RabbitMQ.
-- Gestionează oprirea grațioasă și condițiile de eroare.
+**Usage:**
 
-**Notă:**  
-Orice modificare în `Program.cs` (precum schimbări de logică sau funcționalități noi) necesită recompilarea aplicației pentru ca modificările să aibă efect.
+- Loads configuration values from `appsettings.json` (such as the directory to monitor).
+- Initializes and configures a `FileSystemWatcher` to monitor file changes (create, modify, rename).
+- Filters out temporary or irrelevant files to avoid noisy or redundant events.
+- Uses a thread-safe, deduplicated event cache (`ConcurrentHashSet`) to store detected changes before processing.
+- Runs a background thread that periodically processes pending events, logs them, and sends them to RabbitMQ.
+- Handles graceful shutdown and error conditions.
 
----
+**Note:**  
+Any modification to `Program.cs` (such as logic changes or new functionality) requires recompiling the application for changes to take effect.
 
 ### 2. `appsettings.json`
 
-**Scop:**  
-Conține valorile de configurare care controlează comportamentul aplicației.
+**Purpose:**  
+Contains configuration values that control the application's behavior.
 
-**Utilizare:**
-- Specifică calea folderului care trebuie monitorizat (`NfsWatcher:WatchPath` – partajare Samba) și poate include setări suplimentare pentru RabbitMQ sau alți parametri.
-- Permite schimbarea valorilor de configurare (cum ar fi directorul monitorizat) **fără a recompila aplicația**.
+**Usage:**
 
-**Notă:**  
-Acesta este singurul fișier destinat editării de către utilizator pentru configurare. Toate celelalte modificări necesită recompilare.
+- Specifies the path of the folder to monitor (`NfsWatcher:WatchPath` – Samba share) and can include additional settings for RabbitMQ or other parameters.
+- Allows configuration values (like the monitored directory) to be changed **without recompiling the application**.
 
----
+**Note:**  
+This is the only file intended for user editing for configuration. All other changes require recompilation.
 
 ### 3. `ConcurrentHashSet.cs`
 
-**Scop:**  
-Definește o colecție de tip set thread-safe folosită pentru deduplicarea căilor către fișiere.
+**Purpose:**  
+Defines a thread-safe set collection used for deduplicating file paths.
 
-**Utilizare:**
-- Implementează un set personalizat folosind un dicționar concurent, asigurând stocarea unică a căilor fișierelor.
-- Suportă adăugarea și eliminarea concurentă din mai multe threaduri (watcher-ul de fișiere și procesatorul de evenimente), evitând condițiile de cursă.
-- Este utilizat de `Program.cs` pentru a păstra în cache evenimentele până la procesare.
+**Usage:**
 
-**Notă:**  
-Dacă se modifică logica sau implementarea din `ConcurrentHashSet.cs`, aplicația trebuie recompilată pentru ca schimbările să aibă efect.
+- Implements a custom set using a concurrent dictionary, ensuring unique storage of file paths.
+- Supports concurrent add/remove operations from multiple threads (file watcher and event processor), avoiding race conditions.
+- Used by `Program.cs` to cache events before processing.
 
----
-
-## Monitorizarea Fișierelor cu FileSystemWatcher
-
-
-`FileSystemWatcher` este o clasă oferită de .NET care permite aplicațiilor să monitorizeze în timp real modificările din sistemul de fișiere. Poate urmări un director specific (și opțional subdirectoarele) pentru evenimente precum creare, modificare, ștergere și redenumire.
-
-### Cum este folosit în această aplicație?
-
-În acest proiect, `FileSystemWatcher` este folosit pentru:
-
-- **Monitorizarea unui director** specificat în `appsettings.json`, inclusiv subdirectoarele.
-- **Detectarea evenimentelor** din sistemul de fișiere:
-  - **Created:** când este creat un fișier sau director nou.
-  - **Changed:** când un fișier este modificat.
-  - **Deleted:** când un fișier sau director este șters.
-  - **Renamed:** când un fișier sau director este redenumit.
-
-La detectarea unui astfel de eveniment, aplicația verifică dacă fișierul este temporar sau irelevant. Dacă nu, adaugă evenimentul într-o coadă pentru procesare ulterioară (logare, notificări etc.).
-
-
-### Limitări 
-
-- **Evenimente duplicate:** Pot apărea mai multe evenimente pentru o singură modificare, mai ales pe partajări de rețea (SMB).
-- **Fișiere temporare:** Multe aplicații creează fișiere temporare care declanșează evenimente irelevante.
-- **Notificări imprecise:** Evenimentele pot să nu reflecte exact acțiunea utilizatorului, mai ales pe fișiere de rețea.
-- **SMB/Linux:** Când se monitorizează un server Linux de pe Windows prin SMB:
-  - Pot apărea duplicate sau grupări de evenimente.
-  - Unele evenimente pot lipsi, întârzia sau să nu fie emise.
-  - Operațiile de fișiere din Linux nu au întotdeauna o corespondență exactă cu notificările Windows.
-- **Lipsa de atomicitate:** Evenimentele pot fi raportate înainte ca operația să fie completă (ex: copiere fișier mare).
+**Note:**  
+If the logic or implementation in `ConcurrentHashSet.cs` is changed, the application must be recompiled for changes to take effect.
 
 ---
 
-## Arhitectura de Gestionare a Evenimentelor
+## File Monitoring with FileSystemWatcher
 
-Aplicația folosește un sistem thread-safe pentru a monitoriza, cache-ui și procesa evenimentele. Componentele cheie sunt `ConcurrentHashSet`, `eventMap` și threadul `ProcessEvents`.
+`FileSystemWatcher` is a .NET class that allows applications to monitor file system changes in real-time. It can watch a specific directory (and optionally its subdirectories) for events such as creation, modification, deletion, and renaming.
+
+### How is it used in this application?
+
+In this project, `FileSystemWatcher` is used for:
+
+- **Monitoring a directory** specified in `appsettings.json`, including subdirectories.
+- **Detecting file system events**:
+  - **Created:** when a new file or folder is created.
+  - **Changed:** when a file is modified.
+  - **Deleted:** when a file or folder is deleted.
+  - **Renamed:** when a file or folder is renamed.
+
+Upon detecting such an event, the application checks if the file is temporary or irrelevant. If not, the event is added to a queue for later processing (logging, notifications, etc.).
+
+### Limitations
+
+- **Duplicate events:** Multiple events may be triggered for a single change, especially on network shares (SMB).
+- **Temporary files:** Many applications create temporary files that trigger irrelevant events.
+- **Inaccurate notifications:** Events may not precisely reflect the user's action, especially for network files.
+- **SMB/Linux:** When monitoring a Linux server from Windows via SMB:
+  - Duplicates or grouped events may occur.
+  - Some events may be missing, delayed, or not emitted at all.
+  - File operations on Linux do not always map directly to Windows notifications.
+- **Lack of atomicity:** Events may be reported before the operation is fully completed (e.g., large file copy).
 
 ---
+
+## Event Management Architecture
+
+The application uses a thread-safe system to monitor, cache, and process events. Key components are `ConcurrentHashSet`, `eventMap`, and the `ProcessEvents` thread.
 
 ### 1. `ConcurrentHashSet`
 
-**Ce este?**  
-Un set thread-safe personalizat construit peste `ConcurrentDictionary<string, byte>`.
+**What is it?**  
+A custom thread-safe set built on top of `ConcurrentDictionary<string, byte>`.
 
-**Scop în cod:**  
-- Stochează căi unice către fișiere, **deduplicând** evenimentele rapide sau repetate.
-- Permite acces concurent între threadul principal și cel de fundal.
+**Purpose in code:**  
 
-**Cum stochează informația:**  
-- Căile fișierelor sunt stocate ca și chei în dicționar.
-- Valoarea (`byte`) este nefolosită, setată mereu la 0; doar cheia contează.
-- Suportă adăugare, eliminare și verificare rapidă într-un mod thread-safe.
+- Stores unique file paths, **deduplicating** rapid or repeated events.
+- Allows concurrent access between the main and background threads.
 
----
+**How it stores data:**
+
+- File paths are stored as dictionary keys.
+- The value (`byte`) is unused, always set to 0; only the key matters.
+- Supports fast, thread-safe add, remove, and check operations.
 
 ### 2. `eventMap`
 
-**Ce este?**  
-O instanță statică/globală de `ConcurrentHashSet`.
+**What is it?**  
+A static/global instance of `ConcurrentHashSet`.
 
-**Scop în cod:**  
-- Reprezintă **cache-ul** tuturor evenimentelor unice în așteptare.
-- Primește căi din handler-ele de evenimente.
-- Asigură că același fișier nu este procesat de mai multe ori în aceeași rundă.
+**Purpose in code:**  
 
-**Cum stochează informația:**  
-- Ține căile fișierelor până când sunt procesate.
-- La procesare, calea este eliminată pentru a permite reapariția dacă apar modificări viitoare.
+- Acts as the **cache** for all unique pending events.
+- Receives paths from event handlers.
+- Ensures the same file is not processed more than once per batch.
 
----
+**How it stores data:**  
 
-### 3. `ProcessEvents` (Thread de Fundal)
+- Keeps file paths until processed.
+- Once processed, the path is removed to allow future changes to reappear.
 
-**Ce este?**  
-Un thread dedicat care procesează periodic (la fiecare 500ms) toate evenimentele din `eventMap`.
+### 3. `ProcessEvents` (Background Thread)
 
-**Scop în cod:**  
-- **Procesează în batch** toate evenimentele unice.
-- **Elimină** fiecare cale după procesare pentru a evita duplicarea.
-- Loghează evenimentul și îl trimite către un sistem extern (RabbitMQ).
+**What is it?**  
+A dedicated thread that processes all events in `eventMap` periodically (every 500ms).
 
-**Cum funcționează:**  
-- Ia un snapshot cu toate căile din `eventMap`.
-- Pentru fiecare cale:
-  - O elimină.
-  - Procesează/loghează evenimentul.
-- Așteaptă un interval, apoi repetă ciclul.
+**Purpose in code:**
 
-**De ce am 500ms?**  
-- Intervalul de 500ms este ales pentru a gestiona comportamentul zgomotos al `FileSystemWatcher`, mai ales pe rețele SMB între Linux și Windows.
-- Permite combinarea evenimentelor multiple într-o singură intrare (deduplicare).
-- Este un compromis între timp real și eficiență.
+- **Processes in batch** all unique events.
+- **Removes** each path after processing to avoid duplication.
+- Logs the event and sends it to an external system (RabbitMQ).
 
----
+**How it works:**
 
-### 4. Utilizarea Threadurilor
+- Takes a snapshot of all paths from `eventMap`.
+- For each path:
+  - Removes it.
+  - Processes/logs the event.
+- Waits a set interval, then repeats the cycle.
 
-- **Threadul principal** detectează evenimentele și adaugă căi în `eventMap`.
-- **Threadul de fundal** (`ProcessEvents`) le procesează.
-- Nu este nevoie de locking manual; `ConcurrentHashSet` asigură siguranța concurentă.
+**Why 500ms?**
 
----
+- The 500ms interval is chosen to handle the noisy behavior of `FileSystemWatcher`, especially on SMB networks between Linux and Windows.
+- Allows combining multiple events into a single entry (deduplication).
+- It's a trade-off between real-time response and efficiency.
 
-### 6. Deduplicarea Evenimentelor
+### 4. Thread Usage
 
-- **Deduplicarea** este garantată de natura setului `ConcurrentHashSet`.
-- Dacă un fișier este modificat de mai multe ori rapid, doar o singură intrare este procesată.
-- După ce este procesată și eliminată, o nouă modificare va fi din nou acceptată.
+- **Main thread** detects events and adds paths to `eventMap`.
+- **Background thread** (`ProcessEvents`) processes them.
+- No manual locking needed; `ConcurrentHashSet` ensures thread safety.
 
----
+### 6. Event Deduplication
 
-| Structură           | Tip                                 | Scop                                                | Caracteristică cheie     |
+- **Deduplication** is guaranteed by the nature of the `ConcurrentHashSet`.
+- If a file is modified multiple times quickly, only one entry is processed.
+- Once processed and removed, a new change will be accepted again.
+
+| Structure           | Type                                | Purpose                                             | Key Feature               |
 |---------------------|--------------------------------------|-----------------------------------------------------|---------------------------|
-| ConcurrentHashSet   | Set thread-safe (bazat pe dicționar) | Păstrează căi unice pentru fișiere în așteptare     | Deduplicare               |
-| eventMap            | Instanță statică de ConcurrentHashSet| Stocare globală pentru evenimente în așteptare      | Thread-safe, unicitate    |
-| ProcessEvents()     | Thread de fundal                     | Procesează și elimină evenimente, trimite la RabbitMQ | Procesare periodică în batch |
+| ConcurrentHashSet   | Thread-safe set (dictionary-based)   | Stores unique paths for pending files               | Deduplication             |
+| eventMap            | Static instance of ConcurrentHashSet | Global store for pending events                     | Thread-safe, uniqueness   |
+| ProcessEvents()     | Background thread                    | Processes and removes events, sends to RabbitMQ     | Periodic batch processing |
 
 ---
 
+## RabbitMQ & Docker Configuration
 
- ## Configurare RabbitMQ & Docker
- ### Despre RabbitMQ
- RabbitMQ este un broker de mesaje open-source care implementează protocolul AMQP și izolează producătorii de consumatori prin intermediul cozilor. Acesta asigură trimiterea sigură și ordonată a mesajelor între părţi independente ale unui sistem.
- ### Despre Docker
- Docker este o platformă open-source care permite rularea aplicațiilor în medii izolate, consistente și portabile:
- - **Imagine**: definiția completă a mediului de execuție, creată dintr-un `Dockerfile`
- - **Container**: instanță rulantă a imaginii
- - **Docker Compose**: orchestrează mai multe containere dintr-un fișier YAML
+### About RabbitMQ
 
-### Implementare în .NET
+RabbitMQ is an open-source message broker that implements the AMQP protocol and decouples producers from consumers using queues. It ensures secure and ordered message delivery between independent parts of a system.
 
-#### Clasa `RabbitMqProducer`
-`RabbitMqProducer` gestionează trimiterea **asincronă** a mesajelor către coada RabbitMQ configurată. Când se apelează `SendMessageAsync(string message)`:
-1. Se deschide asincron o conexiune și un canal (`CreateConnectionAsync()` și `CreateChannelAsync()`).
-2. Se declară coada cu `QueueDeclareAsync()`.
-3. Mesajul, convertit în UTF-8, este publicat prin `BasicPublishAsync()`, astfel încât operaţiile de reţea să nu blocheze execuția principală.
-4. Metoda returnează un `Task` care se completează când brokerul confirmă primirea mesajului, iar în consolă apare o linie cu textul trimis.
+### About Docker
+
+Docker is an open-source platform that enables applications to run in isolated, consistent, and portable environments:
+
+- **Image**: the complete definition of the runtime environment, built from a `Dockerfile`
+- **Container**: a running instance of an image
+- **Docker Compose**: orchestrates multiple containers from a YAML file
+
+### Implementation in .NET
+
+#### The `RabbitMqProducer` Class
+
+`RabbitMqProducer` handles **asynchronous** message sending to the configured RabbitMQ queue. When `SendMessageAsync(string message)` is called:
+
+1. It asynchronously opens a connection and channel (`CreateConnectionAsync()` and `CreateChannelAsync()`).
+2. Declares the queue with `QueueDeclareAsync()`.
+3. Converts the message to UTF-8 and publishes it via `BasicPublishAsync()` to avoid blocking the main execution with network operations.
+4. The method returns a `Task` that completes when the broker confirms message receipt, and a log line appears in the console.
 
 #### Dockerfile
-Fișierul `Dockerfile` folosește un build în două etape pentru a optimiza dimensiunea şi viteza imaginii:
+
+The `Dockerfile` uses a two-stage build process to optimize image size and speed:
+
 1. **Build stage**
-   - Pornim de la `mcr.microsoft.com/dotnet/sdk:9.0`, instalăm dependențele cu `dotnet restore` şi publicăm aplicația în folderul `/app/publish`.
-   - Această etapă conține tot SDK-ul necesar pentru compilare, dar nu intră în imaginea finală.
+   - Starts from `mcr.microsoft.com/dotnet/sdk:9.0`, installs dependencies with `dotnet restore`, and publishes the app to `/app/publish`.
+   - This stage includes the full SDK needed for compilation but is not included in the final image.
 
 2. **Runtime stage**
-   - Pornim de la `mcr.microsoft.com/dotnet/aspnet:9.0`, o imagine mai mică care include doar runtime-ul .NET.
-   - Copiem în `/app` rezultatul publicării şi setăm `ENTRYPOINT` la rularea `FileWatcherSMB.dll`.
+   - Starts from `mcr.microsoft.com/dotnet/aspnet:9.0`, a smaller image that includes only the .NET runtime.
+   - Copies the published output to `/app` and sets `ENTRYPOINT` to run `FileWatcherSMB.dll`.
 
 #### docker-compose.yml
-Fişierul `docker-compose.yml` orchestrează cele două servicii principale şi volumul necesar:
-- **Services**
-  - **rabbitmq**: rulează brokerul cu management UI, expune porturile `5672` (AMQP) și `15672` (web UI), şi stochează datele într-un volum persistent (`rabbitmq_data`).
-  - **watcher**: construiește containerul .NET din `Dockerfile`, aşteaptă RabbitMQ (`depends_on`), primeşte configuraţia de watch şi conexiune prin variabile de mediu și montează folderul local read-only pentru monitorizare.
-- **Volumes** – defineşte `rabbitmq_data` pentru a păstra mesajele RabbitMQ peste restart-uri de containere.
 
-### Utilizare
-1. Deschide Docker Desktop
-2. Într-un terminal, navighează în directorul proiectului (unde se află `docker-compose.yml`) și execută:
+The `docker-compose.yml` file orchestrates the two main services and the necessary volume:
+
+- **Services**
+  - **rabbitmq**: runs the broker with management UI, exposes ports `5672` (AMQP) and `15672` (web UI), and stores data in a persistent volume (`rabbitmq_data`).
+  - **watcher**: builds the .NET container from `Dockerfile`, waits for RabbitMQ (`depends_on`), receives watch and connection configuration through environment variables, and mounts the local folder read-only for monitoring.
+
+- **Volumes** – defines `rabbitmq_data` to persist RabbitMQ messages across container restarts.
+
+### Usage
+
+1. Open Docker Desktop  
+2. In a terminal, navigate to the project directory (where `docker-compose.yml` is located) and run:
 ```
 docker-compose up --build
 ```
-3. Accesează RabbitMQ Management UI în browser `http://localhost:15672`
-4. Autentifică-te cu user și parolă: `admin/admin`
-5. Pentru oprire apasă `Ctrl+C` în terminalul unde ai pornit docker-compose și apoi, pentru a curăța complet containerele și volumul, rulează:
+3. Access the RabbitMQ Management UI in your browser at `http://localhost:15672`  
+4. Log in with username and password: `admin/admin`  
+5. To stop, press `Ctrl+C` in the terminal where docker-compose was started, then to clean up containers and volume, run:
 ```
 docker-compose down --volumes
 ```
