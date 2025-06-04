@@ -3,12 +3,14 @@ using FileWatcherSMB.Models;
 using FileWatcherSMB.Services;
 using FileWatcherSMB.src.Helpers;
 using FileWatcherSMB.src.Processors;
+using FileWatcherSMB.src.Services;
 using FileWatcherSMB.src.Watchers;
 using FileWatcherSMB.Watchers;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
 using System;
 using System.IO;
 using System.Threading;
@@ -60,6 +62,16 @@ namespace FileWatcherSMB
                         );
                     });
 
+                    services.AddSingleton<IConnectionFactoryWrapper>(sp =>
+                    {
+                        var rabbitSettings = config
+                            .GetSection("RabbitMq")
+                            .Get<RabbitMqOptions>()
+                            ?? throw new InvalidOperationException("Lipsește RabbitMq din config");
+
+                        return new ConnectionFactoryWrapper(rabbitSettings);
+                    });
+
                     services.AddSingleton<IRabbitMqProducer>(sp =>
                     {
                         var rabbitSettings = config
@@ -68,6 +80,7 @@ namespace FileWatcherSMB
                             ?? throw new InvalidOperationException("Lipsește RabbitMq din config");
 
                         return new RabbitMqProducer(
+                            sp.GetRequiredService<IConnectionFactoryWrapper>(),
                             rabbitSettings,
                             sp.GetRequiredService<ILogger<RabbitMqProducer>>()
                         );

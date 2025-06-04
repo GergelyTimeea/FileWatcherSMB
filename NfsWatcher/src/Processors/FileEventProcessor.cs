@@ -1,6 +1,8 @@
 ﻿using FileWatcherSMB.Helpers;
 using FileWatcherSMB.Services;
+using FileWatcherSMB.src.Watchers;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,11 +15,13 @@ namespace FileWatcherSMB.src.Processors
     {
         private readonly IConcurrentHashSet _eventMap;
         private readonly IRabbitMqProducer _producer;
+        private readonly ILogger<FileEventProcessor> _logger;
 
-        public FileEventProcessor(IConcurrentHashSet eventMap, IRabbitMqProducer producer)
+        public FileEventProcessor(IConcurrentHashSet eventMap, IRabbitMqProducer producer, ILogger<FileEventProcessor> logger)
         {
             _eventMap = eventMap;
             _producer = producer;
+            _logger = logger;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -26,14 +30,19 @@ namespace FileWatcherSMB.src.Processors
             {
                 while (!stoppingToken.IsCancellationRequested)
                 {
-                    var paths = _eventMap.Items.ToList();
-                    foreach (var path in paths)
+                    foreach (var path in _eventMap.Items)
                     {
-                        if (_eventMap.Remove(path))
+                        try
                         {
                             await _producer.SendMessageAsync($"Eveniment: {path}");
+                            _eventMap.Remove(path); // doar dacă trimiterea a mers
+                        }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Eroare la trimiterea mesajului pentru path-ul: {Path}", path);
                         }
                     }
+
 
                     await Task.Delay(500, stoppingToken);
                 }

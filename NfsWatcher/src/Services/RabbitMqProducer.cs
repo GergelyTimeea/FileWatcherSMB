@@ -1,31 +1,27 @@
-﻿using RabbitMQ.Client;
-using System.Text;
-using FileWatcherSMB.Models;
+﻿using FileWatcherSMB.Models;
+using FileWatcherSMB.src.Services;
 using Microsoft.Extensions.Logging;
+using RabbitMQ.Client;
+using System.Text;
 
 namespace FileWatcherSMB.Services
 {
     public class RabbitMqProducer : IRabbitMqProducer
     {
-        private readonly ConnectionFactory _factory;
+        private readonly IConnectionFactoryWrapper _factoryWrapper;
         private readonly string _queueName;
         private readonly ILogger<RabbitMqProducer> _logger;
 
-        public RabbitMqProducer(RabbitMqOptions options, ILogger<RabbitMqProducer> logger)
+        public RabbitMqProducer(IConnectionFactoryWrapper factoryWrapper, RabbitMqOptions options, ILogger<RabbitMqProducer> logger)
         {
-            _factory = new ConnectionFactory
-            {
-                HostName = options.HostName,
-                UserName = options.UserName,
-                Password = options.Password
-            };
+            _factoryWrapper = factoryWrapper;
             _queueName = options.QueueName;
             _logger = logger;
         }
 
         public async Task SendMessageAsync(string message)
         {
-            await using IConnection connection = await _factory.CreateConnectionAsync();
+            await using IConnection connection = await _factoryWrapper.CreateConnectionAsync();
             await using IChannel channel = await connection.CreateChannelAsync();
 
             await channel.QueueDeclareAsync(queue: _queueName,
