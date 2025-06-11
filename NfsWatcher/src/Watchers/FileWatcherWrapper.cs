@@ -14,10 +14,11 @@ namespace FileWatcherSMB.src.Watchers
 {
     public class FileWatcherWrapper : IFileWatcher, IDisposable
     {
-        private readonly FileSystemWatcher _watcher;
-        private readonly IConcurrentHashSet _eventMap;
-        private readonly ITempFileFilter _filter;
-        private readonly ILogger<FileWatcherWrapper> _logger;
+        private readonly FileSystemWatcher _watcher; //Obiectul care urmărește modificările din sistemul de fișiere (creare, modificare, redenumire etc).
+        private readonly IConcurrentHashSet _eventMap;// Un set thread-safe pentru a colecta și deduplica evenimentele 
+        // (fiecare cale de fișier modificat e stocată o singură dată).
+        private readonly ITempFileFilter _filter;//Un filtru care decide dacă un fișier trebuie ignorat (ex: fișiere temporare sau de sistem).
+        private readonly ILogger<FileWatcherWrapper> _logger;//Pentru logarea/înregistrarea erorilor sau a informațiilor utile.
 
         public FileWatcherWrapper(string pathToWatch, IConcurrentHashSet eventMap, ITempFileFilter filter, ILogger<FileWatcherWrapper> logger)
         {
@@ -35,11 +36,11 @@ namespace FileWatcherSMB.src.Watchers
                              | NotifyFilters.LastWrite
                              | NotifyFilters.Security
                              | NotifyFilters.Size,
-                Filter = "*.*",
-                IncludeSubdirectories = true,
-                EnableRaisingEvents = false
+                Filter = "*.*", //se monitorizeaza toate tipurile de fisiere
+                IncludeSubdirectories = true, //monitirizeaza și subdirectoarele
+                EnableRaisingEvents = false //Inițial, nu pornește monitorizarea
             };
-            _watcher.Changed += OnFileChanged;
+            _watcher.Changed += OnFileChanged; //Atașează metodele care tratează evenimentele: Changed, Created, Renamed și Error.
             _watcher.Created += OnFileCreated;
             _watcher.Renamed += OnFileRenamed;
             _watcher.Error += OnFileError;
@@ -57,8 +58,10 @@ namespace FileWatcherSMB.src.Watchers
 
         private void OnFileChanged(object sender, FileSystemEventArgs e)
         {
-            if (_filter.IsTemporaryOrIgnoredFile(e.FullPath)) return;
-            _eventMap.Add(e.FullPath);
+            if (_filter.IsTemporaryOrIgnoredFile(e.FullPath)) return; //Dacă fișierul este temporar sau ignorat (verificat de _filter)
+            // , nu se face nimic.
+            _eventMap.Add(e.FullPath); //Dacă nu, se adaugă calea fișierului în _eventMap (setul de evenimente),
+            //  pentru a fi procesat ulterior.
         }
 
         private void OnFileCreated(object sender, FileSystemEventArgs e)
@@ -77,12 +80,14 @@ namespace FileWatcherSMB.src.Watchers
 
         private void OnFileError(object sender, ErrorEventArgs e)
         {
-            _logger.LogError(e.GetException(), "Eroare la monitorizarea fișierului.");
+            _logger.LogError(e.GetException(), "Eroare la monitorizarea fișierului."); //Dacă apare o eroare la monitorizare, 
+            // loghează eroarea pentru depanare.
         }
 
         public void Dispose()
         {
-            _watcher.Dispose();
+            _watcher.Dispose(); //Eliberează resursele ocupate de FileSystemWatcher când obiectul nu mai e folosit.
+
         }
     }
 }

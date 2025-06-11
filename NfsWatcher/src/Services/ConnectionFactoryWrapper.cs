@@ -10,7 +10,7 @@ namespace FileWatcherSMB.src.Services
 {
     public class ConnectionFactoryWrapper : IConnectionFactoryWrapper
     {
-        private readonly ConnectionFactory _factory;
+        private readonly ConnectionFactory _factory; //obiect din biclioteca RabbitMQ si contine datele de conectare
 
         public ConnectionFactoryWrapper(RabbitMqOptions options)
         {
@@ -22,6 +22,7 @@ namespace FileWatcherSMB.src.Services
             };
         }
 
-        public Task<IConnection> CreateConnectionAsync() => _factory.CreateConnectionAsync();
+        public Task<IConnection> CreateConnectionAsync() => _factory.CreateConnectionAsync(); /* CreateConnectionAsync() apelează metoda async de creare a conexiunii din _factory 
+        și returnează conexiunea către RabbitMQ.*/
     }
 }

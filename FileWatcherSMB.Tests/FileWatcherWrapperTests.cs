@@ -14,21 +14,24 @@ namespace FileWatcherSMB.Tests
 {
     public class FileWatcherWrapperTests : IDisposable
     {
-        private readonly string _tempDir;
-        private readonly Mock<IConcurrentHashSet> _eventMapMock;
+        private readonly string _tempDir; //Un director temporar, creat pentru fiecare test.
+        //În el se simulează modificări de fișiere, ca să nu afectezi alte date de pe disc.
+        private readonly Mock<IConcurrentHashSet> _eventMapMock; // Un mock pentru setul de evenimente, 
+        // adică o simulare a componentului care ține evidența fișierelor modificate.
         private readonly Mock<ITempFileFilter> _filterMock;
         private readonly Mock<ILogger<FileWatcherWrapper>> _loggerMock;
-        private readonly FileWatcherWrapper _wrapper;
+        private readonly FileWatcherWrapper _wrapper; //Instanța reală de FileWatcherWrapper care va fi testată, construită cu mock-urile de mai sus.
 
         public FileWatcherWrapperTests()
         {
             _tempDir = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString());
-            Directory.CreateDirectory(_tempDir);
+            Directory.CreateDirectory(_tempDir); //Creează un director temporar unic pentru fiecare test.
 
-            _eventMapMock = new Mock<IConcurrentHashSet>();
+            _eventMapMock = new Mock<IConcurrentHashSet>(); //mock-urile pentru toate dependențele.
             _filterMock = new Mock<ITempFileFilter>();
             _loggerMock = new Mock<ILogger<FileWatcherWrapper>>();
             _wrapper = new FileWatcherWrapper(_tempDir, _eventMapMock.Object, _filterMock.Object, _loggerMock.Object);
+            //Creează obiectul FileWatcherWrapper cu aceste mock-uri.
         }
 
         [Fact]
@@ -51,6 +54,7 @@ namespace FileWatcherSMB.Tests
         [Fact]
         public void OnFileChanged_AddsPath_IfNotTemporary()
         {
+            //Dacă fișierul schimbat NU este temporar, calea fișierului este adăugată în setul de evenimente.
             var path = Path.Combine(_tempDir, "test.txt");
             _filterMock.Setup(f => f.IsTemporaryOrIgnoredFile(path)).Returns(false);
 
@@ -153,7 +157,7 @@ namespace FileWatcherSMB.Tests
 
         [Fact]
         public void OnFileError_LogsError()
-        {
+        { //Testează că dacă apare o eroare la monitorizare, aceasta este logată o singură dată.
             var exception = new Exception("test error");
             var eventArgs = new ErrorEventArgs(exception);
 
@@ -172,7 +176,7 @@ namespace FileWatcherSMB.Tests
         }
 
         public void Dispose()
-        {
+        { //Metoda Dispose șterge directorul temporar creat și eliberează resursele folosite de watcher după ce s-a terminat testul.
             _wrapper.Dispose();
             if (Directory.Exists(_tempDir))
                 Directory.Delete(_tempDir, true);

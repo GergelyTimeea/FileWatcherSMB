@@ -5,4 +5,4 @@ namespace FileWatcherSMB.Watchers
         void Start();
         void Stop();
     }
-}
+}// orice clasă care implementează IFileWatcher trebuie să aibă metodele Start() și Stop() 

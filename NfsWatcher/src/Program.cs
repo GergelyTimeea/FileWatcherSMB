@@ -21,16 +21,16 @@ namespace FileWatcherSMB
     {
         static async Task Main(string[] args)
         {
-            IHost host = Host.CreateDefaultBuilder(args)
+            IHost host = Host.CreateDefaultBuilder(args) //manager central care se ocupă de pornirea, configurarea și rularea aplicației.
                 .ConfigureLogging(logging =>
-                {
-                    logging.ClearProviders();
+                { //Setează ca mesajele să apară în consolă.
+                    logging.ClearProviders(); 
                     logging.AddConsole();
                     logging.AddFilter("Microsoft.Hosting.Lifetime", LogLevel.None);
                     logging.AddFilter("Microsoft", LogLevel.Warning);
                 })
                 .ConfigureAppConfiguration((context, cfg) =>
-                {
+                { //Încarcă setările din fișierul appsettings.json și din variabilele de mediu.
                     cfg.SetBasePath(Directory.GetCurrentDirectory())
                        .AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
                        .AddEnvironmentVariables();
@@ -90,8 +90,8 @@ namespace FileWatcherSMB
                 })
                 .Build();
 
-            var watcher = host.Services.GetRequiredService<IFileWatcher>();
-            watcher.Start();
+            var watcher = host.Services.GetRequiredService<IFileWatcher>(); 
+            watcher.Start(); //Ia din sistem serviciul care urmărește fișierele și îl pornește.
 
             var logger = host.Services.GetRequiredService<ILogger<Program>>();
             logger.LogInformation("Monitorizare pornită.");

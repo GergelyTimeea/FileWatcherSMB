@@ -9,6 +9,6 @@ namespace FileWatcherSMB.src.Services
 {
     public interface IConnectionFactoryWrapper
     {
-        Task<IConnection> CreateConnectionAsync();
+        Task<IConnection> CreateConnectionAsync(); 
     }
 }

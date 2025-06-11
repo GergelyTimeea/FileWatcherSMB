@@ -28,9 +28,10 @@ namespace FileWatcherSMB.Tests
                 Password = "guest"
             };
 
-            var mockLogger = new Mock<ILogger<RabbitMqProducer>>();
+            var mockLogger = new Mock<ILogger<RabbitMqProducer>>(); 
+            //Mock pentru canalul RabbitMQ (simulează operațiunile pe canal).
 
-            var mockChannel = new Mock<IChannel>();
+            var mockChannel = new Mock<IChannel>(); //Mock pentru canalul RabbitMQ (simulează operațiunile pe canal).
 
             mockChannel
                 .Setup(c => c.QueueDeclareAsync(
@@ -54,33 +55,35 @@ namespace FileWatcherSMB.Tests
                     It.IsAny<System.Threading.CancellationToken>()))
                 .Returns(ValueTask.CompletedTask);
 
-            var mockConnection = new Mock<IConnection>();
+            var mockConnection = new Mock<IConnection>(); //
             
             mockConnection
                 .Setup(c => c.CreateChannelAsync(
                     It.IsAny<CreateChannelOptions>(),
                     It.IsAny<CancellationToken>()))
                 .ReturnsAsync(mockChannel.Object);
+                //Mock pentru conexiunea RabbitMQ (simulează deschiderea canalului).
 
             var mockFactoryWrapper = new Mock<IConnectionFactoryWrapper>();
+            //Mock pentru factory-ul care creează conexiunea RabbitMQ.
 
             mockFactoryWrapper
-                .Setup(f => f.CreateConnectionAsync())
+                .Setup(f => f.CreateConnectionAsync()) 
                 .ReturnsAsync(mockConnection.Object);
 
             var producer = new RabbitMqProducer(mockFactoryWrapper.Object, rabbitOptions, mockLogger.Object);
 
             await producer.SendMessageAsync(testMessage);
 
-            mockFactoryWrapper.Verify(f => f.CreateConnectionAsync(), Times.Once);
+            mockFactoryWrapper.Verify(f => f.CreateConnectionAsync(), Times.Once); //Simulează crearea unei conexiuni RabbitMQ.
 
 
             mockConnection.Verify(c => c.CreateChannelAsync(
                 It.IsAny<CreateChannelOptions>(),
                 It.IsAny<CancellationToken>()),
-                Times.Once);
+                Times.Once); //Simulează crearea unui canal pe conexiunea RabbitMQ.
 
-            mockChannel.Verify(c => c.QueueDeclareAsync(
+            mockChannel.Verify(c => c.QueueDeclareAsync( 
                 It.IsAny<string>(),
                 It.IsAny<bool>(),
                 It.IsAny<bool>(),
@@ -89,7 +92,8 @@ namespace FileWatcherSMB.Tests
                 It.IsAny<bool>(),
                 It.IsAny<bool>(),
                 It.IsAny<CancellationToken>()),
-                Times.Once);
+                Times.Once); // Simulează declararea unei cozi în RabbitMQ. 
+                // Va returna mereu cu succes, ca și cum coada a fost creată.
   
             mockChannel.Verify(c =>
                 c.BasicPublishAsync(
@@ -99,7 +103,7 @@ namespace FileWatcherSMB.Tests
                     It.IsAny<BasicProperties>(),
                     It.IsAny<ReadOnlyMemory<byte>>(),
                     It.IsAny<System.Threading.CancellationToken>()
-                ), Times.Once
+                ), Times.Once //Simulează publicarea mesajului pe coadă. Va returna mereu cu succes.
             );
 
             mockLogger.Verify(logger => logger.Log(
