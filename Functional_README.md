@@ -425,5 +425,7 @@ public async Task SendMessageAsync(string message)
   - **The app** (FileWatcherSMB)
   - **RabbitMQ server** (message broker)
   - **RabbitMQ Web UI** (for easy monitoring and management)
+    ![RabbitMQ_WebUI](https://github.com/user-attachments/assets/b630fa94-c07d-4580-ad1c-57dee07884e6)
+
 
 ---
