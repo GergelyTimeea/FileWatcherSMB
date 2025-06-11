@@ -235,7 +235,6 @@ public void Dispose()
 - Implements `IDisposable` to ensure the watcher is properly cleaned up on shutdown.
 
 ---
-# 📡 Async Event Reporting 
 ## 8. ✅ Recover automatically from temporary failures
 
 **FileEventProcessor — Background Processing:**
@@ -246,6 +245,7 @@ public void Dispose()
 - The app does not crash on transient errors — error handlers log the issue but allow the service to continue, enabling automatic recovery from temporary network or file system issues.
 
 ---
+# 📡 Async Event Reporting 
 ## 9. ✅ Send file events to a **RabbitMQ queue**
 
 The app implements the logic for monitoring file system changes, filtering temporary files, batching events, and **sending notifications through RabbitMQ**.
@@ -270,7 +270,7 @@ The app implements the logic for monitoring file system changes, filtering tempo
  > - Runs continuously in its own background thread using `BackgroundService` and async logic (`ExecuteAsync`) to avoid blocking the main thread.  
   >- For each batch (every 500 milliseconds), it loops through unique paths and sends messages asynchronously to RabbitMQ.
 
-**RabbitMqProducer.cs (from code):**
+**RabbitMqProducer.cs :**
 ```csharp
 public async Task SendMessageAsync(string message)
 {
