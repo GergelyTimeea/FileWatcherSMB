@@ -176,7 +176,7 @@ It can watch a specific directory (and optionally its subdirectories) for events
 
 ---
 
-## Detailed Breakdown of Program.cs
+##  Program.cs
 
 
 `Program.cs` is the **entry point** of the application. It defines how the application starts, sets up configuration, logging, and dependency injection, and orchestrates the initialization of all core components.
@@ -440,16 +440,99 @@ This wrapper allows us to:
    - RabbitMQ receives the file change messages.
    - Other systems or services can consume these messages for further processing.
 
-> All components work together to ensure only meaningful file changes are captured and sent — efficiently, reliably, and without noise.
 
 ---
 
 ### 2. **FileWatcherSMB.Tests (Test Project)**
 
-- Contains unit and integration tests for all the main components.
-- Ensures code correctness, reliability, and helps prevent regressions.
+Below is a brief technical overview of the main test files, the classes they test, and what specific behaviors are verified.
+The test suite is based on unit tests, Moq, and assertions.
+
+### `TempFileFilterTests.cs`
+- **Class tested:** `TempFileFilter`
+- **How:** Directly tests the file filter logic with various file names and patterns.
+- **Behavior:** Checks if files matching patterns (like `.tmp` or names starting with `~$`) are correctly identified as temporary/ignored, and ensures normal files are not ignored.
+
+### `FileEventProcessorTests.cs`
+- **Class tested:** `FileEventProcessor`
+- **How:** Uses mock objects to simulate the event set and RabbitMQ producer.
+- **Behavior:** 
+  - Verifies that file events are sent to the message queue and removed from the event set when processed.
+  - Ensures that no message is sent if a file event cannot be removed from the set.
+
+### `FileWatcherWrapperTests.cs`
+- **Class tested:** `FileWatcherWrapper`
+- **How:** Runs tests with a temporary directory and mocks for dependencies.
+- **Behavior:**
+  - Confirms that watcher starts and stops without errors.
+  - Checks that non-temporary file changes, creations, and renames add file paths to the event set.
+  - Ensures temporary/ignored files are never added to the event set.
+  - Verifies error events are logged as expected.
+
+### `RabbitMqProducerTests.cs`
+- **Class tested:** `RabbitMqProducer`
+- **How:** Uses mock RabbitMQ connection, channel, and logger.
+- **Behavior:** 
+  - Verifies the producer creates a connection and channel, declares the queue, and publishes a message to RabbitMQ.
+  - Ensures an informational log entry is created when a message is sent.
 
 ---
+# How to Configure and Run Tests for FileWatcherSMB 
+
+This guide explains the exact steps and package installations required to run all tests for the **FileWatcherSMB** project. 
+
+
+## 1. Install Required Packages
+
+### a) In the main project directory ( `NfsWatcher`)
+
+Open a terminal in your main project directory and run:
+
+```bash
+dotnet add package RabbitMQ.Client
+dotnet add package Microsoft.Extensions.Logging
+dotnet add package Microsoft.Extensions.Hosting
+```
+
+### b) In the test project directory (`FileWatcherSMB.Tests`)
+
+Navigate to the test project directory:
+
+```bash
+cd FileWatcherSMB.Tests
+```
+
+Then run:
+
+```bash
+dotnet add package xunit
+dotnet add package xunit.runner.visualstudio
+dotnet add package Moq
+dotnet add package Microsoft.NET.Test.Sdk
+dotnet add package Microsoft.Extensions.Logging.Abstractions
+```
+
+---
+
+## 2. Build the Solution
+
+After installing all packages, build the solution to make sure everything is set up correctly:
+
+```bash
+dotnet build
+```
+## 3. Run the Tests
+
+From the test directory run:
+
+```bash
+dotnet test
+```
+
+This will execute all available tests in the project.
+
+---
+
 ## RabbitMQ & Docker Configuration
 
 ### About RabbitMQ
