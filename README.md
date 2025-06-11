@@ -4,104 +4,15 @@ A complete .NET project that monitors files in a shared SMB folder in real-time 
 
 ## Introduction
 
-FileWatcherSMB is an application that automates the process of tracking files in an SMB directory shared by an Ubuntu virtual machine, mounted on a Windows system. This project aims to create a real-time logging and processing system for file events (create, modify, rename), using modern technologies such as:
+**FileWatcherSMB** is an application that automates the process of tracking files in an SMB directory shared by Linux virtual machine, such as Ubuntu, Debian or other distributions, mounted on a Windows system. This project aims to create a real-time logging and processing system for file events (create, modify, rename), using modern technologies such as:
 
 - SMB for file sharing between machines
 - FileSystemWatcher from .NET for local monitoring
 - RabbitMQ for messaging and decoupling the processing flow
-- Docker for quick and isolated RabbitMQ deployment
+- Docker for containerizing the application and deploying RabbitMQ in an isolated environment
 
-## SMB Connection and File Monitoring
+**SMB (Server Message Block)** is a network protocol for file sharing between different devices. In this project, the Ubuntu virtual machine acts as an SMB server, and the host Windows system mounts that shared folder as a local drive.
 
-### Technical Context
-
-SMB (Server Message Block) is a network protocol for file sharing between different devices. In this project, the Ubuntu virtual machine acts as an SMB server, and the host Windows system mounts that shared folder as a local drive.
-
-### SMB Server – Configuration on Ubuntu
-
-1. On the Ubuntu server (VM), we installed and configured Samba:
-```
-sudo apt update
-sudo apt install samba
-```
-Explanation:
-
-- ```apt update``` updates the package list.
-- ```apt install samba``` installs Samba — the software that allows file sharing between Linux and Windows.
-
-2. Creating the folder to be shared
-```
-mkdir -p /home/user_name/smbshare
-```
-Explanation:
-
-- You create the folder you want to share.
-- ```-p``` also creates parent directories if they don’t exist (```home/user_name``` in this case).
-```
-sudo chown timi:timi /home/user_name/smbshare
-```
-- This ensures that the ```user_name``` has write permissions to the shared folder.
-
-3. Adding the configuration to the ```smb.conf``` file
-```
-sudo nano /etc/samba/smb.conf
-```
-Add at the end of the file:
-```
-[smbshare]
-   path = /home/user_name/smbshare
-   browseable = yes
-   read only = no
-   guest ok = no
-   valid users = user_name
-```
-Explanation:
-
-- ```[smbshare]``` – the name that will appear in the network.
-- ```path``` – the actual folder location.
-- ```browseable``` = yes – allows it to be visible on the network.
-- ```read only``` = no – grants write permission.
-- ```guest ok``` = no – disallows anonymous access.
-- ```valid users``` = user_name – only the ```user_name``` can access it.
-
-4. Creating a Samba user
-```
-sudo smbpasswd -a user_name
-```
-Explanation:
-
-- Adds the ```user_name``` to the Samba system and sets a password.
-- The user must already exist on the Ubuntu system.
-
-5. Restarting the Samba service
-```
-sudo systemctl restart smbd
-```
-Explanation:
-
-- Applies the new changes made to the ```smb.conf``` file.
-
-### Mounting the Share on Windows
-
-On Windows, the folder was mounted using the following steps:
-
-1. **Open File Explorer** → click on **This PC**
-2. **Right-click** in the window → **Map network drive**
-3. Chose **Z:**
-4. Under **Folder**, entered:
-```
-\\192.168.1.10\smbshare
-```
-(Replace the IP with your Ubuntu's IP address, and ```smbshare``` with the share name from smb.conf)
-
-5. Checked:
-
-- _ _Reconnect at sign-in_ _ – so it reconnects automatically after restart
-
-6. Click **Finish**
-7. Entered the user ```user_name``` and the password set with ```smbpasswd -a user_name```
-
----
 
 ## Code Architecture Overview
 
@@ -129,7 +40,7 @@ This repository contains two main projects:
 
     - **Helpers/**
         - `ConcurrentHashSet.cs` and `IConcurrentHashSet.cs`: Implements a thread-safe set for tracking unique file events across threads.
-        - `ItempFileFilter.cs` and `TempFileFilter.cs`: Defines and implements logic to filter out temporary/irrelevant files, so only meaningful changes are processed.
+        - `ITempFileFilter.cs` and `TempFileFilter.cs`: Defines and implements logic to filter out temporary/irrelevant files, so only meaningful changes are processed.
     
     - **Models/**
         - `RabbitMqOptions.cs`: Defines configuration options (host, credentials, queue) used for connecting to RabbitMQ.
@@ -138,6 +49,7 @@ This repository contains two main projects:
         - `FileEventProcessor.cs`: Handles the core logic of batching and processing file system events.
 
     - **Services/**
+        - `IConnectionFactoryWrapper.cs` and `ConnectionFactoryWrapper.cs`: Provide an abstraction for creating RabbitMQ connections asynchronously.
         - `IRabbitMqProducer.cs` and `RabbitMqProducer.cs`: Interface and implementation for sending messages to RabbitMQ.
 
     - **Watchers/**
@@ -228,27 +140,26 @@ It can watch a specific directory (and optionally its subdirectories) for events
   ---
 ## RabbitMQ Integration
 
-#### 1. Configuration Model: `Models/RabbitMqOptions.cs`
+RabbitMQ is an open-source message broker that implements the AMQP protocol and decouples producers from consumers using queues. It ensures secure and ordered message delivery between independent parts of a system.
+
+### Configuration Model: `Models/RabbitMqOptions.cs`
 
 This class defines how RabbitMQ connection settings are represented in code.  
 It includes properties for `HostName`, `UserName`, `Password`, and `QueueName`, which are mapped from `appsettings.json` or environment variables at startup.
 
 This design keeps configuration clean and separate from logic, making it easy to manage and modify connection settings.
 
+### Connection Abstraction: `Services/IConnectionFactoryWrapper.cs` & `Services/ConnectionFactoryWrapper.cs`
 
+- **`IConnectionFactoryWrapper.cs`** defines an abstraction for creating RabbitMQ connections asynchronously. It allows other components to depend on a simple interface rather than the RabbitMQ client directly, enabling testability and separation of concerns.
+- **`ConnectionFactoryWrapper.cs`** is a concrete implementation, wrapping RabbitMQ's ConnectionFactory. It reads configuration values from RabbitMqOptions and provides an asynchronous method for creating IConnection instances.
 
-#### 2. Producer Abstraction: `Services/IRabbitMqProducer.cs` & `Services/RabbitMqProducer.cs`
+### Producer Abstraction: `Services/IRabbitMqProducer.cs` & `Services/RabbitMqProducer.cs`
 
 - **`IRabbitMqProducer.cs`** defines the interface for publishing messages to RabbitMQ. This abstraction decouples the rest of the application from the messaging details and allows for easy mocking during testing.
 - **`RabbitMqProducer.cs`** is the implementation. It takes a `RabbitMqOptions` instance (via dependency injection), establishes the connection, and exposes methods for sending messages to the configured queue.
 
-By separating configuration, interface, and implementation:
-- The application remains modular and testable.
-- It is easy to change RabbitMQ settings or swap out the messaging technology without significant code changes.
-
-
-
-##### Particularities of `RabbitMqProducer.cs`
+#### Particularities of `RabbitMqProducer.cs`
 
 - **Async Message Sending:**  
   Messages are sent to RabbitMQ using an async method. This means the operation does not block the application while waiting for RabbitMQ to confirm the message, making the system more responsive and scalable, especially when many messages are sent.
@@ -264,23 +175,21 @@ By separating configuration, interface, and implementation:
 ---
 ## Temporary File Filtering: `Helpers/ITempFileFilter.cs` and `Helpers/TempFileFilter.cs`
 
-#### Importnace of temp file filtering in our app:
+### Importance of temporary file filtering in our app:
 
 When files are edited or copied (especially on network shares like SMB/NFS), many programs and operating systems create temporary files.  
 These might have extensions like `.tmp`, `.~`, `.swp`, or start with `~$`.  
 These files are used internally and do not represent real user changes, so we do not want to process or send events about them.
 
-Filtering them out:
+### Filtering them out:
 - **Prevents noise:** Makes sure only important, real file events are processed and sent.
 - **Improves performance:** Avoids unnecessary processing and messaging.
 - **Reduces errors:** Prevents acting on incomplete or irrelevant files.
 
 
-#### How does the file filtering work?
+### How does the file filtering work?
 
-- **`ITempFileFilter`** is a simple interface.  
-  It defines a method that takes a file path and returns whether the file should be ignored (because it is temporary).  
-  This makes the filter easy to swap or mock for testing.
+- **`ITempFileFilter`** defines a simple yet flexible interface for identifying files that should be excluded from processing (typically temporary or auto-generated files). By abstracting this logic, the application enables easy customization, mocking, and extension of filtering behavior.
 
 - **`TempFileFilter`** is the class that actually does the filtering.  
   - When the application starts, it loads a list of patterns to ignore from the configuration file (`appsettings.json`).  
@@ -289,7 +198,7 @@ Filtering them out:
   - If the file name matches one of the patterns, the event is ignored and no further action is taken for that file.
 
 
-#### How are patterns extracted and used?
+### How are patterns extracted and used?
 
 - Patterns are listed in the configuration (for example, `NfsWatcher:IgnorePatterns` in `appsettings.json`).
 - Example patterns: `*.tmp`, `*.swp`, `~$*`, etc.
@@ -297,7 +206,7 @@ Filtering them out:
 
 
 
-#### How does this connect to the rest of the app?
+### How does this connect to the rest of the app?
 
 - The application always works with the `ITempFileFilter` interface, not the concrete `TempFileFilter` class.
 - At runtime, the actual `TempFileFilter` is injected wherever needed.
@@ -305,12 +214,10 @@ Filtering them out:
 ---
 ## Event Deduplication Structures Used: `Helpers/IConcurrentHashSet.cs` and `Helpers/ConcurrentHashSet.cs`
 
-####
+This part of the code provides a **thread-safe set** - a data structure that safely stores unique items even when accessed by multiple threads at the same time.  
+In this application, it is used to deduplicate file events, ensuring that if the same file changes multiple times in quick succession, only one event is retained for processing. This allows both the file watcher and the background processor to interact with the set safely and concurrently.
 
-This part of the code provides a **thread-safe set**—a data structure that safely stores unique items even when accessed by multiple threads at the same time.  
-In this app, it is used to keep track of which file events need to be processed, making sure each file is only handled once per batch.
-
-#### How does it work?
+### How does it work?
 
 - **`IConcurrentHashSet`** is the interface.  
   It defines the basic operations needed for a set:
@@ -323,11 +230,6 @@ In this app, it is used to keep track of which file events need to be processed,
   - Internally, it uses a `ConcurrentDictionary<string, byte>` to store items in a thread-safe way.
   - Each file path is used as a key; the value (a byte) is not important.
   - This structure allows fast and safe adding, checking, and removing of items, even when multiple threads interact with it.
-
-#### The exact role played in the app:
-
-- It ensures that file events are **deduplicated**: if the same file changes multiple times quickly, only one event is kept until it is processed.
-- It is safe to use from different threads, so the main file watcher and the background processor can both access it without problems.
 
 ---
 ## File Watcher Abstraction: `Watchers/IFileWatcher.cs` and `Watchers/FileWatcherWrapper.cs`
@@ -378,15 +280,11 @@ This wrapper allows us to:
 
 
 ---
-### Event Processing and Batching: `Processors/FileEventProcessor.cs`
-
-
+## Event Processing and Batching: `Processors/FileEventProcessor.cs`
 
 `FileEventProcessor` is the background service responsible for collecting, deduplicating, batching, and processing file events detected by the watcher. It connects the watcher, the deduplication set, and the RabbitMQ producer, making sure only unique and relevant events are sent out efficiently.
 
-
-
-#### How does it work?
+### How does it work?
 
 - **Structures Used:**
   - Uses `IConcurrentHashSet` to store unique file paths that need processing (deduplication).
@@ -415,8 +313,39 @@ This wrapper allows us to:
 - **Cancellation and Shutdown:**
   - The processor listens for cancellation requests (`stoppingToken`) so it can stop gracefully when the application is shutting down.
 
+---
+## Docker
 
+Docker is an open-source platform that enables applications to run in isolated, consistent, and portable environments:
 
+- **Image**: the complete definition of the runtime environment, built from a `Dockerfile`
+- **Container**: a running instance of an image
+- **Docker Compose**: orchestrates multiple containers from a YAML file
+
+### Dockerfile
+
+The `Dockerfile` uses a two-stage build process to optimize image size and speed:
+
+1. **Build stage**
+   - Based on `mcr.microsoft.com/dotnet/sdk:9.0`, which includes the full .NET SDK needed for building the application.
+   - Restores dependencies using `dotnet restore` and compiles the project with `dotnet publish`.
+   - The published output is placed in `/app/publish`.
+   - This stage is used only for building and it is excluded from the final image.
+
+2. **Runtime stage**
+   - Based on `mcr.microsoft.com/dotnet/aspnet:9.0`, a lightweight image that includes only the .NET runtime.
+   - Copies the published application from the build stage into the `/app` directory.
+   - Sets the entry point to run the application with `dotnet FileWatcherSMB.dll`.
+
+### docker-compose.yml
+
+The `docker-compose.yml` file orchestrates the two main services and the necessary volume:
+
+- **Services**
+  - **rabbitmq**: runs the broker with management UI, exposes ports `5672` (AMQP) and `15672` (web UI), and stores broker state in a persistent volume (`rabbitmq_data`) to preserve data across restarts.
+  - **watcher**: builds the .NET container from `Dockerfile`, waits for RabbitMQ (`depends_on`), receives watch and connection configuration through environment variables, and mounts the local folder read-only for monitoring.
+
+- **Volumes** – defines `rabbitmq_data` to persist RabbitMQ messages across container restarts.
 ---
 ## How Everything Works Together —  Summary:
 
@@ -440,12 +369,112 @@ This wrapper allows us to:
    - RabbitMQ receives the file change messages.
    - Other systems or services can consume these messages for further processing.
 
+---
+## How to Configure and Run The App
+
+### SMB Server – Configuration on Ubuntu
+
+1. On the Ubuntu server (VM), we installed and configured Samba:
+```
+sudo apt update
+sudo apt install samba
+```
+Explanation:
+
+- ```apt update``` updates the package list.
+- ```apt install samba``` installs Samba — the software that allows file sharing between Linux and Windows.
+
+2. Creating the folder to be shared
+```
+mkdir -p /home/user_name/smbshare
+```
+Explanation:
+
+- You create the folder you want to share.
+- ```-p``` also creates parent directories if they don’t exist (```home/user_name``` in this case).
+```
+sudo chown timi:timi /home/user_name/smbshare
+```
+- This ensures that the ```user_name``` has write permissions to the shared folder.
+
+3. Adding the configuration to the ```smb.conf``` file
+```
+sudo nano /etc/samba/smb.conf
+```
+Add at the end of the file:
+```
+[smbshare]
+   path = /home/user_name/smbshare
+   browseable = yes
+   read only = no
+   guest ok = no
+   valid users = user_name
+```
+Explanation:
+
+- ```[smbshare]``` – the name that will appear in the network.
+- ```path``` – the actual folder location.
+- ```browseable``` = yes – allows it to be visible on the network.
+- ```read only``` = no – grants write permission.
+- ```guest ok``` = no – disallows anonymous access.
+- ```valid users``` = user_name – only the ```user_name``` can access it.
+
+4. Creating a Samba user
+```
+sudo smbpasswd -a user_name
+```
+Explanation:
+
+- Adds the ```user_name``` to the Samba system and sets a password.
+- The user must already exist on the Ubuntu system.
+
+5. Restarting the Samba service
+```
+sudo systemctl restart smbd
+```
+Explanation:
+
+- Applies the new changes made to the ```smb.conf``` file.
+
+### Mounting the Share on Windows
+
+On Windows, the folder was mounted using the following steps:
+
+1. **Open File Explorer** → click on **This PC**
+2. **Right-click** in the window → **Map network drive**
+3. Chose **Z:**
+4. Under **Folder**, entered:
+```
+\\192.168.1.10\smbshare
+```
+(Replace the IP with your Ubuntu's IP address, and ```smbshare``` with the share name from smb.conf)
+
+5. Checked:
+
+- _ _Reconnect at sign-in_ _ – so it reconnects automatically after restart
+
+6. Click **Finish**
+7. Entered the user ```user_name``` and the password set with ```smbpasswd -a user_name```
 
 ---
 
+### Running the Application
+
+1. Open Docker Desktop  
+2. In a terminal, navigate to the project directory (where `docker-compose.yml` is located) and run:
+```
+docker-compose up --build
+```
+3. Access the RabbitMQ Management UI in your browser at `http://localhost:15672`  
+4. Log in with username and password: `admin/admin`
+5.  To stop, press `Ctrl+C` in the terminal where docker-compose was started, then to clean up containers and volume, run:
+```
+docker-compose down --volumes
+```  
+
 ### 2. **FileWatcherSMB.Tests (Test Project)**
 
-Below is a brief technical overview of the main test files, the classes they test, and what specific behaviors are verified.
+Below, there is a brief technical overview of the main test files, the classes they test, and what specific behaviors are verified.
 The test suite is based on unit tests, Moq, and assertions.
 
 ### `TempFileFilterTests.cs`
@@ -477,7 +506,7 @@ The test suite is based on unit tests, Moq, and assertions.
   - Ensures an informational log entry is created when a message is sent.
 
 ---
-# How to Configure and Run Tests for FileWatcherSMB 
+## How to Configure and Run Tests for FileWatcherSMB 
 
 This guide explains the exact steps and package installations required to run all tests for the **FileWatcherSMB** project. 
 
@@ -533,63 +562,4 @@ This will execute all available tests in the project.
 
 ---
 
-## RabbitMQ & Docker Configuration
 
-### About RabbitMQ
-
-RabbitMQ is an open-source message broker that implements the AMQP protocol and decouples producers from consumers using queues. It ensures secure and ordered message delivery between independent parts of a system.
-
-### About Docker
-
-Docker is an open-source platform that enables applications to run in isolated, consistent, and portable environments:
-
-- **Image**: the complete definition of the runtime environment, built from a `Dockerfile`
-- **Container**: a running instance of an image
-- **Docker Compose**: orchestrates multiple containers from a YAML file
-
-### Implementation in .NET
-
-#### The `RabbitMqProducer` Class
-
-`RabbitMqProducer` handles **asynchronous** message sending to the configured RabbitMQ queue. When `SendMessageAsync(string message)` is called:
-
-1. It asynchronously opens a connection and channel (`CreateConnectionAsync()` and `CreateChannelAsync()`).
-2. Declares the queue with `QueueDeclareAsync()`.
-3. Converts the message to UTF-8 and publishes it via `BasicPublishAsync()` to avoid blocking the main execution with network operations.
-4. The method returns a `Task` that completes when the broker confirms message receipt, and a log line appears in the console.
-
-#### Dockerfile
-
-The `Dockerfile` uses a two-stage build process to optimize image size and speed:
-
-1. **Build stage**
-   - Starts from `mcr.microsoft.com/dotnet/sdk:9.0`, installs dependencies with `dotnet restore`, and publishes the app to `/app/publish`.
-   - This stage includes the full SDK needed for compilation but is not included in the final image.
-
-2. **Runtime stage**
-   - Starts from `mcr.microsoft.com/dotnet/aspnet:9.0`, a smaller image that includes only the .NET runtime.
-   - Copies the published output to `/app` and sets `ENTRYPOINT` to run `FileWatcherSMB.dll`.
-
-#### docker-compose.yml
-
-The `docker-compose.yml` file orchestrates the two main services and the necessary volume:
-
-- **Services**
-  - **rabbitmq**: runs the broker with management UI, exposes ports `5672` (AMQP) and `15672` (web UI), and stores data in a persistent volume (`rabbitmq_data`).
-  - **watcher**: builds the .NET container from `Dockerfile`, waits for RabbitMQ (`depends_on`), receives watch and connection configuration through environment variables, and mounts the local folder read-only for monitoring.
-
-- **Volumes** – defines `rabbitmq_data` to persist RabbitMQ messages across container restarts.
-
-### Usage
-
-1. Open Docker Desktop  
-2. In a terminal, navigate to the project directory (where `docker-compose.yml` is located) and run:
-```
-docker-compose up --build
-```
-3. Access the RabbitMQ Management UI in your browser at `http://localhost:15672`  
-4. Log in with username and password: `admin/admin`  
-5. To stop, press `Ctrl+C` in the terminal where docker-compose was started, then to clean up containers and volume, run:
-```
-docker-compose down --volumes
-```
