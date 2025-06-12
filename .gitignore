@@ -1,40 +1,4 @@
-# Build results
+.vs/
 bin/
 obj/
-out/
-publish/
-
-# User-specific files
 *.user
-*.suo
-*.userosscache
-*.sln.docstates
-
-# IDE and tool settings
-.vs/
-.vscode/
-*.code-workspace
-
-# OS and editor temp files
-.DS_Store
-Thumbs.db
-*~
-*.swp
-*.tmp
-
-# Docker local overrides
-docker-compose.override.yml
-
-# Environment/user config overrides (optional, if used)
-appsettings.Development.json
-appsettings.Local.json
-secrets.json
-
-# Test results and coverage
-TestResults/
-*.coverage
-*.coveragexml
-
-# Rider IDE
-.idea/
-*.sln.iml
