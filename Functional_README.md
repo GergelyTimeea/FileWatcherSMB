@@ -48,7 +48,7 @@ The application should then **send these events to a RabbitMQ queue**, allowing 
 
 ## ⚠️ Key Challanges & Known Issues & Design Considerations
 
-### 🧠 FileSystemWatcher Limitations
+### 🧠 FileSystemWatcher Key Challanges & Known Issues
 - `FileSystemWatcher` has a **limited internal buffer**
 - Events must be **handled quickly** or they’ll be dropped
 
