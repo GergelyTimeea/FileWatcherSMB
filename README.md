@@ -73,7 +73,7 @@ It can watch a specific directory (and optionally its subdirectories) for events
 - We use `FileSystemWatcher` under the hood to receive notifications when files change, but expose a cleaner and more flexible interface to the rest of our application.
 
 
-#### Limitations of FileSystemWatcher
+#### Key Challanges & Known Issues of FileSystemWatcher
 
 - **Duplicate events:**  
   Multiple notifications may be triggered for a single file operation, especially on network shares. This can lead to processing the same file more than once unless handled.
