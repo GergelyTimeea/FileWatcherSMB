@@ -46,7 +46,7 @@ The application should then **send these events to a RabbitMQ queue**, allowing 
 
 ---
 
-## ⚠️ Known Issues & Design Considerations
+## ⚠️ Key Challanges & Known Issues & Design Considerations
 
 ### 🧠 FileSystemWatcher Limitations
 - `FileSystemWatcher` has a **limited internal buffer**
@@ -71,7 +71,7 @@ The application should then **send these events to a RabbitMQ queue**, allowing 
 
 ---
 
-## 🧪 Test Criteria
+## 🧪 Acceptance Criteria & Test Criteria
 
 ### 📦 Bulk File Drop Test
 A folder with **1,000 files** will be copied into the monitored SMB share.
